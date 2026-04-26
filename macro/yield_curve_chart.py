@@ -11,7 +11,7 @@ load_dotenv()
 
 api_key = os.getenv("FRED_API_KEY")
 if not api_key:
-    raise RuntimeError("FRED_API_KEY not found in .env")
+    raise RuntimeError("FRED_API_KEY not found in environment or .env file")
 
 fred = Fred(api_key=api_key.strip())
 
