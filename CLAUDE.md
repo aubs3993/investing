@@ -47,3 +47,4 @@ Always use named ranges in code (`ws["WACC"] = 0.085`), never raw cell reference
 - Never set git config without explicit instruction
 - Always add a `.gitkeep` when creating an empty subfolder under `output/`
 - Pause and ask if anything looks unexpected, especially around staging files that look like secrets or large binaries
+- At the start of every local session, run `git pull` before making any changes. This ensures the local working copy includes any changes merged from cloud sessions.
