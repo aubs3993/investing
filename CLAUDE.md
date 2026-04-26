@@ -29,6 +29,8 @@ All scripts must use `Path(__file__).resolve().parent` to anchor file paths to t
 - `macro/output/**/*` and `companies/output/**/*` are ignored
 - `!macro/output/**/` and `!companies/output/**/` re-include directories so git can descend into them
 - `!**/.gitkeep` tracks the `.gitkeep` markers
+- `!macro/output/**/*.png` tracks chart PNGs under `macro/output/` so they can be referenced from Notion summaries and reviewed in git history; xlsx data files under `macro/output/` remain ignored
+- `companies/output/` remains fully ignored (no PNG exception) — filled Excel files there are per-run artifacts, not shared assets
 - When creating any new output subfolder, always add a `.gitkeep` file inside it
 
 ## Excel workflow (companies side)
