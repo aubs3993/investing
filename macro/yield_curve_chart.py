@@ -82,3 +82,7 @@ else:
 
 print(f"Appended 'Chart Data' sheet to {xlsx_path} ({len(chart_df)} rows)")
 print(f"Recession periods detected: {len(bands)}")
+print(
+    "Chart uses FRED's T10Y2Y series directly, which can be 1 trading day "
+    "ahead of the joint pull when DFF hasn't published."
+)
