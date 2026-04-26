@@ -20,3 +20,4 @@ companies/output/**/*
 !macro/output/**/
 !companies/output/**/
 !**/.gitkeep
+!macro/output/**/*.png

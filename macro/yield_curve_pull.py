@@ -31,6 +31,8 @@ df = pd.DataFrame(frames)
 df.index.name = "Date"
 df = df.reset_index()
 df["10Y_minus_2Y"] = df["10Y"] - df["2Y"]
+# Require all three series for joint analysis. DFF typically lags DGS10/DGS2
+# by ~1 trading day, so this drops the most recent rows where DFF is unpublished.
 df = df.dropna(subset=["10Y", "2Y", "FedFunds"]).reset_index(drop=True)
 
 summary_cols = ["10Y", "2Y", "FedFunds", "10Y_minus_2Y"]
@@ -52,3 +54,8 @@ print(f"Start date:  {df['Date'].iloc[0].date()}")
 print(f"End date:    {df['Date'].iloc[-1].date()}")
 print(f"Rows:        {len(df)}")
 print(f"Latest 10Y-2Y spread: {df['10Y_minus_2Y'].iloc[-1]:.2f}")
+print(
+    f"Pulled {len(df)} rows. Note: rows are dropped if any of DGS10/DGS2/DFF "
+    "is missing — DFF typically lags by 1 trading day, so the pull may end "
+    "1 day before the chart's T10Y2Y series."
+)
