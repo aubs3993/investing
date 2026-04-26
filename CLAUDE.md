@@ -48,3 +48,11 @@ Always use named ranges in code (`ws["WACC"] = 0.085`), never raw cell reference
 - Always add a `.gitkeep` when creating an empty subfolder under `output/`
 - Pause and ask if anything looks unexpected, especially around staging files that look like secrets or large binaries
 - At the start of every local session, run `git pull` before making any changes. This ensures the local working copy includes any changes merged from cloud sessions.
+
+## Notion integration
+The Notion MCP is connected for local sessions. When asked to update Notion:
+- Investing pages live under the "Investing" parent page (id: 347440ca-0d18-8116-b9fa-cbb37af18b54)
+- Macro analysis goes in the "Macro" sub-page (id: 34e440ca-0d18-8103-abb9-fe57c62ad904)
+- Always show me the proposed Notion changes before writing them
+- Never delete existing Notion content without explicit approval
+- Reference chart files via their GitHub raw URLs, not local paths
