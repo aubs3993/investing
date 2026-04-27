@@ -93,6 +93,9 @@ style_macro_chart(
     ax,
     title="Nonfarm payrolls — monthly change, 2006–present",
     ylabel="Jobs added (thousands)",
+    # Clipped at +/-5000 so the COVID swing (-20M / +5M) doesn't compress the
+    # rest of the cycle. COVID bars/MA visibly run off-axis by design.
+    ylim=(-5000, 5000),
     recessions=recessions,
     hlines=[{"y": 0.0}],
 )
@@ -111,6 +114,8 @@ style_macro_chart(
     ax,
     title="Initial jobless claims, 2006–present",
     ylabel="Claims",
+    # Clipped at 1M so the COVID 6M+ peak doesn't compress GFC and current.
+    ylim=(0, 1_000_000),
     recessions=recessions,
 )
 fig.tight_layout()
@@ -126,6 +131,8 @@ style_macro_chart(
     ax,
     title="Unemployment rate, 2006–present",
     ylabel="Percent",
+    # Clipped at 10% so the COVID ~14.8% spike doesn't compress GFC and trend.
+    ylim=(0, 10),
     recessions=recessions,
 )
 fig.tight_layout()
@@ -141,6 +148,9 @@ style_macro_chart(
     ax,
     title="Sahm Rule recession indicator (real-time), 2006–present",
     ylabel="Percentage points",
+    # Clipped at 4pp so the COVID 9.5pp peak doesn't compress GFC and current.
+    # Lower bound preserves the small post-GFC negative readings.
+    ylim=(-0.5, 4),
     recessions=recessions,
     hlines=[{"y": 0.5, "label": "Recession trigger", "color": "#c0392b"}],
 )
