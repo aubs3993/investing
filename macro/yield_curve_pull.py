@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 import sys
 
@@ -17,7 +17,7 @@ from shared.fred_helpers import (
 fred = get_fred_client()
 
 end = datetime.today()
-start = end - timedelta(days=365 * 20)
+start = datetime(2006, 1, 1)
 
 series = {
     "10Y": "DGS10",
