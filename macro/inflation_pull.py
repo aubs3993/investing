@@ -79,8 +79,7 @@ style_macro_chart(
     ylabel="YoY % change",
     ylim=YLIM,
     recessions=recessions,
-    hline=2.0,
-    hline_label="Fed target (PCE basis)",
+    hlines=[{"y": 2.0, "label": "Fed target (PCE basis)"}],
 )
 fig.tight_layout()
 fig.savefig(OUT_DIR / "cpi_yoy.png", dpi=150)
@@ -98,8 +97,7 @@ style_macro_chart(
     ylabel="YoY % change",
     ylim=YLIM,
     recessions=recessions,
-    hline=2.0,
-    hline_label=None,
+    hlines=[{"y": 2.0, "label": None}],
 )
 fig.tight_layout()
 fig.savefig(OUT_DIR / "pce_yoy.png", dpi=150)

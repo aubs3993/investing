@@ -57,8 +57,7 @@ style_macro_chart(
     ylabel="Spread (percentage points)",
     ylim=(-1.5, 3.5),
     recessions=recessions,
-    hline=0.0,
-    hline_label="Inversion threshold",
+    hlines=[{"y": 0.0, "label": "Inversion threshold"}],
 )
 fig.tight_layout()
 fig.savefig(OUT_DIR / "spread_chart.png", dpi=150)
