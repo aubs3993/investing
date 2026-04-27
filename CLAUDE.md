@@ -47,7 +47,11 @@ Always use named ranges in code (`ws["WACC"] = 0.085`), never raw cell reference
 - Never set git config without explicit instruction
 - Always add a `.gitkeep` when creating an empty subfolder under `output/`
 - Pause and ask if anything looks unexpected, especially around staging files that look like secrets or large binaries
-- At the start of every local session, run `git pull` before making any changes. This ensures the local working copy includes any changes merged from cloud sessions.
+- At the start of every local session, run `git status` and `git fetch --prune` to assess branch state. Then:
+  - If on main with no uncommitted changes: run `git pull`
+  - If on a feature branch with uncommitted or unpushed work: report the state to me and ask whether I want to continue this work or switch to main for something new
+  - If on a stale feature branch (merged and deleted on origin): offer to switch to main, pull, and delete the local branch
+  Do not auto-switch branches without my explicit instruction.
 
 ## Notion integration
 The Notion MCP is connected for local sessions. When asked to update Notion:
