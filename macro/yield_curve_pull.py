@@ -1,17 +1,13 @@
 from datetime import datetime, timedelta
-from dotenv import load_dotenv
-from fredapi import Fred
 from pathlib import Path
-import os
+import sys
+
 import pandas as pd
 
-load_dotenv()
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from shared.fred_helpers import get_fred_client, pull_series, resolve_output_dir
 
-api_key = os.getenv("FRED_API_KEY")
-if not api_key:
-    raise RuntimeError("FRED_API_KEY not found in environment or .env file")
-
-fred = Fred(api_key=api_key.strip())
+fred = get_fred_client()
 
 end = datetime.today()
 start = end - timedelta(days=365 * 20)
@@ -22,14 +18,7 @@ series = {
     "FedFunds": "DFF",
 }
 
-frames = {
-    name: fred.get_series(sid, observation_start=start, observation_end=end)
-    for name, sid in series.items()
-}
-
-df = pd.DataFrame(frames)
-df.index.name = "Date"
-df = df.reset_index()
+df = pull_series(fred, series, start, end)
 df["10Y_minus_2Y"] = df["10Y"] - df["2Y"]
 # Require all three series for joint analysis. DFF typically lags DGS10/DGS2
 # by ~1 trading day, so this drops the most recent rows where DFF is unpublished.
@@ -43,8 +32,7 @@ summary = pd.DataFrame({
     "most_recent": df[summary_cols].iloc[-1],
 })
 
-OUT_DIR = Path(__file__).resolve().parent / "output" / "yield_curve"
-OUT_DIR.mkdir(parents=True, exist_ok=True)
+OUT_DIR = resolve_output_dir(__file__, "yield_curve")
 out_path = OUT_DIR / "yields.xlsx"
 with pd.ExcelWriter(out_path, engine="openpyxl") as writer:
     df.to_excel(writer, sheet_name="Data", index=False)
