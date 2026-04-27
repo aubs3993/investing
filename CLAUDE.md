@@ -57,6 +57,7 @@ Always use named ranges in code (`ws["WACC"] = 0.085`), never raw cell reference
 The Notion MCP is connected for local sessions. When asked to update Notion:
 - Investing pages live under the "Investing" parent page (id: 347440ca-0d18-8116-b9fa-cbb37af18b54)
 - Macro analysis goes in the "Macro" sub-page (id: 34e440ca-0d18-8103-abb9-fe57c62ad904)
-- Always show me the proposed Notion changes before writing them
+- Make routine additions and updates freely (new sections, appended content, refreshed summaries, new sub-pages under Investing). Briefly tell me what was changed after each batch of edits so I can scan for issues.
 - Never delete existing Notion content without explicit approval
+- Only use replace_content (full-page replacement) with explicit instruction. For in-place edits, use update_content with targeted search-and-replace.
 - Reference chart files via their GitHub raw URLs, not local paths
