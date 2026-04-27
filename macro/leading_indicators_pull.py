@@ -128,8 +128,10 @@ style_macro_chart(
     ax,
     title="Chicago Fed National Activity Index, 2006–present",
     ylabel="Index value",
-    # Clipped at +/-4 so COVID extremes run off-axis but normal cycle is readable.
-    ylim=(-4, 4),
+    # Tightened to (-3, 2) so the GFC trough still sits cleanly inside the
+    # frame while normal-cycle variation around zero is more legible. COVID
+    # extremes run off-axis as designed.
+    ylim=(-3, 2),
     recessions=recessions,
     hlines=[
         {"y": 0.0, "label": "Zero growth"},
