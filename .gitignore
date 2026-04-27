@@ -21,3 +21,8 @@ companies/output/**/*
 !companies/output/**/
 !**/.gitkeep
 !macro/output/**/*.png
+
+# Override: track the HY OAS archive CSV. FRED restricted BAMLH0A0HYM2 to a
+# rolling 3-year window in April 2026, so we accumulate our own daily history
+# here. This is the only xlsx/csv data file under macro/output/ that is tracked.
+!macro/output/credit_spreads/hy_oas_archive.csv

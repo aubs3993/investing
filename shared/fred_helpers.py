@@ -69,19 +69,26 @@ def style_macro_chart(
     ylabel: str,
     ylim: tuple[float, float] | None = None,
     recessions: list[tuple[pd.Timestamp, pd.Timestamp]] | None = None,
-    hline: float | None = None,
-    hline_label: str | None = None,
+    hlines: list[dict] | None = None,
 ) -> None:
+    """Apply shared macro-chart styling.
+
+    hlines: list of dicts, each with keys:
+      - "y" (float, required): y-value of the line
+      - "label" (str | None): legend label; None to omit from legend
+      - "color" (str, optional): line color, default "0.4"
+      - "linestyle" (str, optional): default "--"
+    """
     if recessions:
         for r_start, r_end in recessions:
             ax.axvspan(r_start, r_end, color="0.85", alpha=0.5, zorder=0)
-    if hline is not None:
+    for h in hlines or []:
         ax.axhline(
-            hline,
-            color="0.4",
-            linestyle="--",
+            h["y"],
+            color=h.get("color", "0.4"),
+            linestyle=h.get("linestyle", "--"),
             linewidth=1,
-            label=hline_label,
+            label=h.get("label"),
             zorder=1,
         )
     if ylim is not None:
