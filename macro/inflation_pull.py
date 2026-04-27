@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 import sys
 
@@ -17,10 +17,10 @@ from shared.fred_helpers import (
 fred = get_fred_client()
 
 end = datetime.today()
-chart_start = end - timedelta(days=365 * 20)
-# Pull ~13 months of history before chart_start so YoY is defined at the chart's
-# left edge rather than starting blank for the first year.
-data_start = chart_start - timedelta(days=400)
+chart_start = datetime(2006, 1, 1)
+# Pull a 12-month buffer of prior history so YoY is defined at chart_start
+# rather than starting blank for the first year.
+data_start = datetime(2005, 1, 1)
 
 series = {
     "CPI_headline": "CPIAUCSL",

@@ -20,6 +20,13 @@ Personal investing research repo. `macro/` holds individual scripts that pull ma
 ## Path handling
 All scripts must use `Path(__file__).resolve().parent` to anchor file paths to the script's location, so scripts work regardless of working directory.
 
+## Macro data conventions
+- All macro/ scripts default to a start date of 2006-01-01. This window includes the GFC and COVID — the two stress events most relevant for current investing decisions — and keeps x-axes comparable across charts.
+- Use end = datetime.today() for the end date.
+- If a FRED series doesn't go back to 2006, start at the earliest available date and document the exception in a comment at the top of the script.
+- For derived series (e.g. YoY % change) that need lookback data, fetch with a buffer (e.g. 2005-01-01) but filter the displayed/charted/saved data to start at 2006-01-01 so all macro charts have aligned x-axes.
+- When computing reference statistics (median, percentile rank, min/max) for chart annotations, compute over the 2006+ window (what's on the chart), not the full series history.
+
 ## Secrets and environment
 - `.env` at project root holds all API keys; always loaded via `python-dotenv`
 - `.env` is gitignored; never commit, never paste in chat, never hardcode
