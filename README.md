@@ -6,6 +6,7 @@ Personal investing research repo. Code is organized by what it analyzes.
 
 - `macro/` — standalone scripts that pull macro data series (yield curve, CPI, employment, etc.). Each script writes outputs to `macro/output/<topic>/`. See `macro/README.md` for the convention.
 - `companies/` — company-specific filings analysis. Configs in `companies/configs/`, generated artifacts in `companies/output/`.
+- `templates/` — master Excel templates copied and filled by per-ticker scripts. See `templates/README.md`.
 - `shared/` — reusable helpers used across `macro/` and `companies/`.
 
 ## Setup

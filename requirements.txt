@@ -3,3 +3,5 @@ openpyxl
 python-dotenv
 fredapi
 matplotlib
+pyyaml
+xlwings

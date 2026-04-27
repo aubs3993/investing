@@ -15,6 +15,12 @@ env/
 .mypy_cache/
 .ipynb_checkpoints/
 
+# Office lock/temp files (created while a doc is open in Excel/Word/PowerPoint)
+~$*.xlsx
+~$*.xlsm
+~$*.docx
+~$*.pptx
+
 macro/output/**/*
 companies/output/**/*
 !macro/output/**/

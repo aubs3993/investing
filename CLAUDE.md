@@ -68,3 +68,65 @@ The Notion MCP is connected for local sessions. When asked to update Notion:
 - Never delete existing Notion content without explicit approval
 - Only use replace_content (full-page replacement) with explicit instruction. For in-place edits, use update_content with targeted search-and-replace.
 - Reference chart files via their GitHub raw URLs, not local paths
+
+## Project Conventions
+
+### Folder structure
+- `templates/` — read-only master `.xlsx` files. Scripts copy and fill, never modify in place.
+- `companies/output/<TICKER>/` — per-ticker generated artifacts. Disposable, regenerable from template + config.
+- `companies/configs/<ticker>.yaml` — per-ticker inputs that drive template fills.
+- `shared/` — reusable Python helpers imported by `macro/` and `companies/` scripts.
+
+### Library preferences
+- Default to `openpyxl` for `.xlsx` reads/writes.
+- Use `xlwings` only when the workflow requires live Excel calc, formula evaluation, or refreshing
+  data connections (Power Query, external links).
+
+### Excel template workflow
+- Scripts that fill templates must:
+  1. Copy the master template from `templates/` to the destination path.
+  2. Open the copy and write to **named ranges** (e.g., `inp_ticker`), never cell coordinates.
+  3. Save the copy. Never modify the master.
+- Master template `.xlsx` files **are committed** to the repo. Binary diffs aren't useful — review
+  template changes by opening the file in Excel before merging.
+- Input cells in templates use the `inp_` prefix for named ranges and yellow fill with a dotted blue border.
+
+### Modeling conventions
+- Year columns combine historical (suffix `A`) and projected (suffix `E`).
+- Banker color coding: blue font for hardcoded inputs, black for formulas, green for cross-tab links.
+- Subtotal/total rows are bold with a single top border.
+
+### CapIQ integration
+- Historical financials and current-state inputs flow from `templates/capiq_fetcher.xlsx` (live CapIQ formulas) into `templates/company_model.xlsx` → hidden `_CapIQ_Data` tab (hardcoded values).
+- IS, CF, and Inputs tabs link to `_CapIQ_Data` via formulas. They never reference CapIQ functions directly.
+- The fetcher and `_CapIQ_Data` tab share an identical row/column layout — adding a field requires editing both files. `shared/capiq_layout.py` is the shared source of truth for row positions and field names.
+- Refresh via `python -m shared.fetch_capiq <TICKER>` (uses xlwings to drive live Excel + CapIQ plugin).
+- The main template must be openable on machines without CapIQ access — never break this invariant.
+
+### Broker estimates integration
+- Broker consensus forecasts flow from `templates/broker_fetcher.xlsx` (live `IQ_EST_*` formulas) into `templates/company_model.xlsx` → hidden `_Broker_Data` tab.
+- `shared/broker_layout.py` is the shared layout source of truth (mirror of `capiq_layout.py`).
+- Implied growth/margin rows (B20:B25) and implied upside (B30) live as formulas in the main template, not in the fetcher — they reference `_CapIQ_Data` historicals so they update when those refresh.
+- Refresh via `python -m shared.fetch_broker_estimates <TICKER>`.
+
+### Per-ticker workflow
+1. **Bootstrap:** `python -m companies.scripts.new_ticker <TICKER>` (copies master template to `companies/output/<TICKER>/<TICKER>_model.xlsx`, creates skeleton YAML)
+2. **Fetch historicals:** `python -m shared.fetch_capiq <TICKER>`
+3. **Fetch broker estimates:** `python -m shared.fetch_broker_estimates <TICKER>`
+4. **Extract briefs:** `python -m companies.scripts.extract_historicals <TICKER>` and `python -m companies.scripts.extract_broker_estimates <TICKER>`
+5. **Research drivers:** Open Claude Code session. Ask Claude to research drivers for the ticker using `companies/scripts/driver_research_playbook.md`. Claude reads historicals, consensus, Notion, and SEC filings; writes to YAML config and rationale markdown; updates Historical Analysis in Notion (durable) and appends Driver Research entry (dated).
+6. **Review:** User reviews YAML and rationale, makes edits.
+7. **Populate model:** `python -m companies.scripts.populate_drivers <TICKER>`
+8. **Final review:** Open model in Excel.
+
+The split between research (Claude-driven) and populate (deterministic) means values can be regenerated without re-running research. Both fetch scripts auto-detect the per-ticker model copy if it exists, so the master template stays clean.
+
+### Notion structure per company
+Each company page in Notion has two distinct sections:
+- **Historical Analysis** (durable, refined session-over-session) — captures *why* historicals look the way they do. Updated, not appended.
+- **Driver Research — [date]** (one entry per session, append-only) — dated forward views. Snapshot of analytical state.
+
+This separation prevents historical knowledge from getting buried under successive forward-looking sessions.
+
+### Broker estimates as framing, not anchor
+Broker estimates from `_Broker_Data` are a data point, not a target. The driver research playbook requires explicit articulation of variant view (above/below/in-line vs. consensus) for every driver. If variant view can't be articulated with specificity, default to consensus.
