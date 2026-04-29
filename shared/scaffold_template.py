@@ -3,6 +3,13 @@
 Idempotent: re-running overwrites the file. This is the master template only —
 runtime scripts copy this file to companies/output/<TICKER>/ before filling.
 
+Universal layout conventions (apply to every tab):
+  - Gridlines off
+  - Default font Arial 10pt (applied via cell styling)
+  - Column A is a 2.71-wide blank spacer; all content starts in column B
+  - Row 1 is blank; row 2 holds a dynamic title formula at B2
+    (=inp_ticker & " | <Tab Title>"); row 3 is blank; content begins at row 4
+
 Run from repo root:
     python -m shared.scaffold_template
 """
@@ -23,29 +30,39 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 TEMPLATE_PATH = REPO_ROOT / "templates" / "company_model.xlsx"
 
 
-# --- Styles ---
-BLUE = "0000FF"
-GREEN = "008000"
+# --- Universal styling (Arial 10pt across the workbook) ---
+ARIAL = "Arial"
+ARIAL_SIZE = 10
+
+BLUE_INPUT = "0000FF"
+GREEN_LINK = "008000"
+BLACK = "000000"
 WHITE = "FFFFFF"
-YELLOW = "FFFF00"
-HEADER_HEX = "1F4E78"
+YELLOW_FILL = "FFFF99"
+HEADER_BLUE = "0070C0"
+BANNER_GRAY = "808080"
 
-DOTTED_BLUE = Side(border_style="dotted", color=BLUE)
-THIN_BLACK = Side(border_style="thin", color="000000")
+HAIR = Side(border_style="hair")
+THIN_TOP = Side(border_style="thin")
 
-INPUT_FONT = Font(color=BLUE, name="Calibri", size=11)
-INPUT_FILL = PatternFill("solid", fgColor=YELLOW)
-INPUT_BORDER = Border(left=DOTTED_BLUE, right=DOTTED_BLUE, top=DOTTED_BLUE, bottom=DOTTED_BLUE)
-LINK_FONT = Font(color=GREEN, name="Calibri", size=11)
-FORMULA_FONT = Font(color="000000", name="Calibri", size=11)
-SUBTOTAL_FONT = Font(color="000000", bold=True, name="Calibri", size=11)
-SUBTOTAL_BORDER = Border(top=THIN_BLACK)
-HEADER_FONT = Font(color=WHITE, bold=True, name="Calibri", size=11)
-HEADER_FILL = PatternFill("solid", fgColor=HEADER_HEX)
-SECTION_FONT = Font(bold=True, size=12, name="Calibri")
-TITLE_FONT = Font(bold=True, size=14, name="Calibri")
-LABEL_BOLD = Font(bold=True, name="Calibri", size=11)
-BANNER_FONT = Font(italic=True, color="808080", name="Calibri", size=10)
+INPUT_FONT = Font(name=ARIAL, size=ARIAL_SIZE, bold=False, color=BLUE_INPUT)
+INPUT_FILL = PatternFill("solid", fgColor=YELLOW_FILL)
+INPUT_BORDER = Border(top=HAIR, bottom=HAIR, left=HAIR, right=HAIR)
+
+HEADER_FONT = Font(name=ARIAL, size=ARIAL_SIZE, bold=True, color=WHITE)
+HEADER_FILL = PatternFill("solid", fgColor=HEADER_BLUE)
+HEADER_ALIGN = Alignment(horizontal="center", vertical="center")
+
+LINK_FONT = Font(name=ARIAL, size=ARIAL_SIZE, color=GREEN_LINK)
+FORMULA_FONT = Font(name=ARIAL, size=ARIAL_SIZE, color=BLACK)
+SUBTOTAL_FONT = Font(name=ARIAL, size=ARIAL_SIZE, bold=True, color=BLACK)
+SUBTOTAL_TOP_BORDER = Border(top=THIN_TOP)
+
+TITLE_FONT = Font(name=ARIAL, size=ARIAL_SIZE, bold=True, color=BLACK)
+LABEL_FONT = Font(name=ARIAL, size=ARIAL_SIZE, color=BLACK)
+LABEL_BOLD_FONT = Font(name=ARIAL, size=ARIAL_SIZE, bold=True, color=BLACK)
+SECTION_FONT = Font(name=ARIAL, size=ARIAL_SIZE, bold=True, color=BLACK)
+BANNER_FONT = Font(name=ARIAL, size=ARIAL_SIZE, italic=True, color=BANNER_GRAY)
 
 
 # --- Number formats ---
@@ -53,12 +70,15 @@ NUM = "#,##0;(#,##0)"
 NUM_DEC = "#,##0.00;(#,##0.00)"
 PCT = "0.0%"
 MULT = '0.0"x"'
+RATIO = '0.00"x"'
 DATE = "mm/dd/yyyy"
+DATETIME = "mm/dd/yyyy hh:mm"
 PRICE = "$#,##0.00;($#,##0.00)"
-DPS = "$0.0000"
+DPS = "$0.00"
 TEXT = "@"
 
 
+# --- Style helpers ---
 def style_input(cell, num_format=NUM):
     cell.font = INPUT_FONT
     cell.fill = INPUT_FILL
@@ -78,18 +98,31 @@ def style_link(cell, num_format=NUM):
 
 def style_subtotal(cell, num_format=NUM):
     cell.font = SUBTOTAL_FONT
-    cell.border = SUBTOTAL_BORDER
+    cell.border = SUBTOTAL_TOP_BORDER
     cell.number_format = num_format
 
 
 def style_header(cell):
     cell.font = HEADER_FONT
     cell.fill = HEADER_FILL
-    cell.alignment = Alignment(horizontal="center")
+    cell.alignment = HEADER_ALIGN
+
+
+def style_label(cell, bold=False):
+    cell.font = LABEL_BOLD_FONT if bold else LABEL_FONT
 
 
 def add_named_range(wb, name, sheet, ref):
     wb.defined_names[name] = DefinedName(name=name, attr_text=f"{sheet}!{ref}")
+
+
+# --- Universal sheet setup ---
+def apply_sheet_defaults(ws, tab_title: str):
+    """Apply gridlines-off, column A spacer, blank row 1, and B2 title."""
+    ws.sheet_view.showGridLines = False
+    ws.column_dimensions["A"].width = 2.71
+    title_cell = ws.cell(2, 2, f'=inp_ticker & " | {tab_title}"')
+    title_cell.font = TITLE_FONT
 
 
 def make_year_columns():
@@ -101,115 +134,223 @@ def make_year_columns():
 
 
 def col(i):
-    """0-indexed year position -> Excel column letter (B..N)."""
-    return get_column_letter(i + 2)
+    """0-indexed year position -> Excel column letter (C..O).
+
+    Year columns sit to the right of column A (spacer) and column B (label),
+    so the first year column is C (index 0 -> C).
+    """
+    return get_column_letter(i + 3)
 
 
-# --- Inputs tab layout (fixed row positions other tabs reference) ---
-# Tuple: (label, named_range, num_format, default, capiq_link)
-# capiq_link: formula string -> green link to _CapIQ_Data; None -> blue input cell
-INPUTS_FIRST_ROW = 4
+# --- Inputs tab layout (referenced by other tabs via named ranges) ---
+# Universal: row 1 blank, row 2 title, row 3 blank, content from row 4.
+INPUTS_SECTION_A_ROW = 4
+INPUTS_FIRST_ROW = 5
+
+# Tuple: (label, named_range, num_format, default, link_formula)
+# link_formula present -> green LINK; otherwise blue INPUT cell.
 INPUT_ROWS = [
     ("Ticker",                     "inp_ticker",              TEXT,  "TICKR",        None),
-    ("Company Name",               "inp_company_name",        TEXT,  "Company Name", "=_CapIQ_Data!E7"),
-    ("Sector",                     "inp_sector",              TEXT,  "Sector",       "=_CapIQ_Data!E8"),
-    ("Currency",                   "inp_currency",            TEXT,  "USD",          "=_CapIQ_Data!E9"),
-    ("Fiscal Year End Month",      "inp_fye_month",           "0",   12,             None),
     ("Run Date",                   "inp_run_date",            DATE,  None,           None),
-    ("Current Price",              "inp_current_price",       PRICE, 0,              "=_CapIQ_Data!E13"),
-    ("Diluted Shares Outstanding", "inp_diluted_shares",      NUM,   0,              "=_CapIQ_Data!E14"),
-    ("Quarterly DPS",              "inp_quarterly_dps",       DPS,   0,              "=_CapIQ_Data!E15"),
+    ("Fiscal Year End Month",      "inp_fye_month",           "0",   12,             None),
+    ("Company Name",               "inp_company_name",        TEXT,  None,           "=_CapIQ_Data!F12"),
+    ("Sector",                     "inp_sector",              TEXT,  None,           "=_CapIQ_Data!F13"),
+    ("Currency",                   "inp_currency",            TEXT,  None,           "=_CapIQ_Data!F14"),
+    ("Current Price",              "inp_current_price",       PRICE, None,           "=_CapIQ_Data!F18"),
+    ("Diluted Shares Outstanding", "inp_diluted_shares",      NUM,   None,           "=_CapIQ_Data!F19"),
+    ("Annual DPS",                 "inp_annual_dps",          DPS,   None,           "=IFERROR(_CapIQ_Data!E40, _CapIQ_Data!D40)"),
     ("DPS Annual Growth %",        "inp_dps_growth",          PCT,   0,              None),
-    ("Tax Rate",                   "inp_tax_rate",            PCT,   0.21,           "=_CapIQ_Data!E20"),
-    ("Cash & Equivalents",         "inp_cash",                NUM,   0,              "=_CapIQ_Data!E16"),
-    ("Total Debt",                 "inp_debt",                NUM,   0,              "=_CapIQ_Data!E17"),
-    ("Minority Interest (NCI)",    "inp_minority_interest",   NUM,   0,              "=_CapIQ_Data!E18"),
-    ("Equity Investments",         "inp_equity_investments",  NUM,   0,              "=_CapIQ_Data!E19"),
+    ("Tax Rate",                   "inp_tax_rate",            PCT,   0.21,           None),
+    ("Cash & Equivalents",         "inp_cash",                NUM,   None,           "=_CapIQ_Data!F21"),
+    ("Total Debt",                 "inp_debt",                NUM,   None,           "=_CapIQ_Data!F23"),
+    ("Minority Interest",          "inp_minority_interest",   NUM,   None,           "=_CapIQ_Data!F25"),
+    ("Equity Investments",         "inp_equity_investments",  NUM,   None,           "=_CapIQ_Data!F26"),
     ("Cash Sweep %",               "inp_cash_sweep_pct",      PCT,   0,              None),
     ("Minimum Cash Balance",       "inp_min_cash",            NUM,   0,              None),
 ]
-SECTION_B_HEADER_ROW = 22
+
+INPUTS_SECTION_B_ROW = INPUTS_FIRST_ROW + len(INPUT_ROWS) + 1  # 5 + 17 + 1 = 23
 CALC_ROWS = [
-    ("Annual DPS (current)",                "=inp_quarterly_dps*4",                                                        "annual_dps",      DPS),
-    ("Total Annual Dividends Paid (current)", "=annual_dps*inp_diluted_shares",                                            "calc_annual_div", NUM),
-    ("Current Market Cap",                  "=inp_current_price*inp_diluted_shares",                                       "mkt_cap",         NUM),
-    ("Net Debt",                            "=inp_debt-inp_cash",                                                          None,              NUM),
-    ("Current Enterprise Value",            "=mkt_cap+inp_debt-inp_cash+inp_minority_interest-inp_equity_investments",     None,              NUM),
+    ("Annual Dividends Paid (current)", "=inp_annual_dps*inp_diluted_shares",                                            "calc_annual_div", NUM),
+    ("Current Market Cap",              "=inp_current_price*inp_diluted_shares",                                         "mkt_cap",         NUM),
+    ("Net Debt",                        "=inp_debt-inp_cash",                                                            None,              NUM),
+    ("Current Enterprise Value",        "=mkt_cap+inp_debt-inp_cash+inp_minority_interest-inp_equity_investments",       None,              NUM),
 ]
-SECTION_C_HEADER_ROW = 29
-DRIVER_HEADER_ROW = 30
-DRIVER_FIRST_ROW = 31
+
+INPUTS_SECTION_C_ROW = INPUTS_SECTION_B_ROW + len(CALC_ROWS) + 2  # 23 + 4 + 2 = 29
+DRIVER_HEADER_ROW = INPUTS_SECTION_C_ROW + 1  # 30
+DRIVER_FIRST_ROW = INPUTS_SECTION_C_ROW + 2   # 31
 DRIVERS = [
     ("Revenue Growth %",         PCT,  0.05),
     ("Gross Margin %",           PCT,  0.40),
     ("Total OpEx % of Revenue",  PCT,  0.20),
     ("CapEx % of Revenue",       PCT,  0.05),
-    ("D&A % of CapEx",           PCT,  1.0),
+    ("D&A % of CapEx",           RATIO, 1.0),
     ("Exit EBITDA Multiple",     MULT, 10),
 ]
-DRV_REV = 31
-DRV_GM = 32
-DRV_OPEX = 33
-DRV_CAPEX = 34
-DRV_DA = 35
-DRV_EXIT = 36
+DRV_REV   = DRIVER_FIRST_ROW + 0
+DRV_GM    = DRIVER_FIRST_ROW + 1
+DRV_OPEX  = DRIVER_FIRST_ROW + 2
+DRV_CAPEX = DRIVER_FIRST_ROW + 3
+DRV_DA    = DRIVER_FIRST_ROW + 4
+DRV_EXIT  = DRIVER_FIRST_ROW + 5
 
 
+# --- IS row map (years are columns C..O = 13 cols starting at col index 3) ---
+IS_ROW_HEADER  = 4
+IS_ROW_REV     = 5
+IS_ROW_GROWTH  = 6
+IS_ROW_COGS    = 7
+IS_ROW_GP      = 8
+IS_ROW_GM      = 9
+IS_ROW_OPEX    = 10
+IS_ROW_EBITDA  = 11
+IS_ROW_EBITDAM = 12
+IS_ROW_DA      = 13
+IS_ROW_EBIT    = 14
+IS_ROW_EBITM   = 15
+IS_ROW_INTEXP  = 16
+IS_ROW_INTINC  = 17
+IS_ROW_PRETAX  = 18
+IS_ROW_TAX     = 19
+IS_ROW_ETR     = 20
+IS_ROW_NI      = 21
+IS_ROW_SHARES  = 22
+IS_ROW_EPS     = 23
+
+# --- CF row map ---
+CF_ROW_HEADER     = 4
+CF_ROW_EBITDA     = 5
+CF_ROW_TAXES      = 6
+CF_ROW_INTEREST   = 7
+CF_ROW_CAPEX      = 8
+CF_ROW_LFCF       = 9
+CF_ROW_DEBT_AMORT = 10
+CF_ROW_DIVIDENDS  = 11
+CF_ROW_NETCHG     = 12
+CF_ROW_BEGCASH    = 13
+CF_ROW_ENDCASH    = 14
+
+# --- Debt row map ---
+DEBT_ROW_HEADER    = 4
+DEBT_ROW_REVOLVER  = 5
+DEBT_ROW_REV_BEG   = 6
+DEBT_ROW_REV_DRAW  = 7
+DEBT_ROW_REV_REPAY = 8
+DEBT_ROW_REV_END   = 9
+DEBT_ROW_REV_AVG   = 10
+DEBT_ROW_REV_RATE  = 11
+DEBT_ROW_REV_INT   = 12
+DEBT_ROW_TL_TITLE  = 14
+DEBT_ROW_TL_BEG    = 15
+DEBT_ROW_TL_AMORT  = 16
+DEBT_ROW_TL_PREPAY = 17
+DEBT_ROW_TL_END    = 18
+DEBT_ROW_TL_AVG    = 19
+DEBT_ROW_TL_RATE   = 20
+DEBT_ROW_TL_INT    = 21
+DEBT_ROW_SN_TITLE  = 23
+DEBT_ROW_SN_BEG    = 24
+DEBT_ROW_SN_REPAY  = 25
+DEBT_ROW_SN_END    = 26
+DEBT_ROW_SN_RATE   = 27
+DEBT_ROW_SN_INT    = 28
+DEBT_ROW_TOT_TITLE = 30
+DEBT_ROW_TOT_BEG   = 31
+DEBT_ROW_TOT_END   = 32
+DEBT_ROW_TOT_INT   = 33
+DEBT_ROW_TOT_AMORT = 34
+DEBT_ROW_TOT_PREP  = 35
+DEBT_ROW_SW_TITLE  = 37
+DEBT_ROW_SW_AVAIL  = 38
+DEBT_ROW_SW_APPLY  = 39
+DEBT_ROW_SW_TL     = 40
+
+# --- Valuation row map ---
+VAL_ROW_HEADER  = 4
+VAL_ROW_EBITDA  = 5
+VAL_ROW_MULT    = 6
+VAL_ROW_EV      = 7
+VAL_ROW_DEBT    = 8
+VAL_ROW_CASH    = 9
+VAL_ROW_NCI     = 10
+VAL_ROW_EQINV   = 11
+VAL_ROW_EQUITY  = 12
+VAL_ROW_SHARES  = 13
+VAL_ROW_PPS     = 14
+VAL_ROW_IRR     = 15
+VAL_ROW_MOIC    = 16
+
+
+# --- Build functions ---
 def build_inputs(ws, years):
-    ws["A1"] = "Inputs & Assumptions"
-    ws["A1"].font = TITLE_FONT
+    apply_sheet_defaults(ws, "Inputs & Assumptions")
 
-    ws["A3"] = "Inputs (CapIQ-driven where available; manual otherwise)"
-    ws["A3"].font = SECTION_FONT
+    style_label(ws.cell(INPUTS_SECTION_A_ROW, 2,
+                        "Inputs (CapIQ-driven where available; manual otherwise)"), bold=True)
     for i, (label, _name, fmt, default, link) in enumerate(INPUT_ROWS):
         r = INPUTS_FIRST_ROW + i
-        ws.cell(r, 1, label)
+        style_label(ws.cell(r, 2, label))
         if link is not None:
-            c = ws.cell(r, 2, link)
+            c = ws.cell(r, 3, link)
             style_link(c, num_format=fmt)
         else:
-            val = default if default is not None else datetime.now().date()
-            c = ws.cell(r, 2, val)
+            val = default if default is not None else (datetime.now().date() if fmt == DATE else 0)
+            c = ws.cell(r, 3, val)
             style_input(c, num_format=fmt)
 
-    ws.cell(SECTION_B_HEADER_ROW, 1, "Calculated").font = SECTION_FONT
+    style_label(ws.cell(INPUTS_SECTION_B_ROW, 2, "Calculated"), bold=True)
     for i, (label, formula, _name, fmt) in enumerate(CALC_ROWS):
-        r = SECTION_B_HEADER_ROW + 1 + i
-        ws.cell(r, 1, label)
-        c = ws.cell(r, 2, formula)
+        r = INPUTS_SECTION_B_ROW + 1 + i
+        style_label(ws.cell(r, 2, label))
+        c = ws.cell(r, 3, formula)
         style_formula(c, num_format=fmt)
 
-    ws.cell(SECTION_C_HEADER_ROW, 1, "Driver Assumptions (manual fill)").font = SECTION_FONT
+    style_label(ws.cell(INPUTS_SECTION_C_ROW, 2, "Driver Assumptions (manual fill)"), bold=True)
     for i, (_yr, lbl) in enumerate(years):
         if lbl.endswith("E"):
-            style_header(ws.cell(DRIVER_HEADER_ROW, i + 2, lbl))
+            style_header(ws.cell(DRIVER_HEADER_ROW, i + 3, lbl))
     for i, (label, fmt, default) in enumerate(DRIVERS):
         r = DRIVER_FIRST_ROW + i
-        ws.cell(r, 1, label)
+        style_label(ws.cell(r, 2, label))
         for j, (_yr, lbl) in enumerate(years):
             if lbl.endswith("E"):
-                c = ws.cell(r, j + 2, default)
+                c = ws.cell(r, j + 3, default)
                 style_input(c, num_format=fmt)
 
-    ws.column_dimensions["A"].width = 35
+    ws.column_dimensions["B"].width = 35
     for j in range(len(years)):
         ws.column_dimensions[col(j)].width = 14
 
 
 def register_inputs_named_ranges(wb):
+    """Inputs values live in column C (was column B before the universal shift)."""
     for i, (_label, name, _fmt, _default, _link) in enumerate(INPUT_ROWS):
         r = INPUTS_FIRST_ROW + i
-        add_named_range(wb, name, "Inputs", f"$B${r}")
+        add_named_range(wb, name, "Inputs", f"$C${r}")
     for i, (_label, _formula, name, _fmt) in enumerate(CALC_ROWS):
         if name is None:
             continue
-        r = SECTION_B_HEADER_ROW + 1 + i
-        add_named_range(wb, name, "Inputs", f"$B${r}")
+        r = INPUTS_SECTION_B_ROW + 1 + i
+        add_named_range(wb, name, "Inputs", f"$C${r}")
+
+
+def register_driver_named_ranges(wb):
+    """Driver assumption rows on Inputs (F..O for the 10 projection years)."""
+    drv_ranges = {
+        "drv_revenue_growth": DRV_REV,
+        "drv_gross_margin":   DRV_GM,
+        "drv_opex_pct_rev":   DRV_OPEX,
+        "drv_capex_pct_rev":  DRV_CAPEX,
+        "drv_da_pct_capex":   DRV_DA,
+        "drv_exit_multiple":  DRV_EXIT,
+    }
+    for name, row in drv_ranges.items():
+        add_named_range(wb, name, "Inputs", f"$F${row}:$O${row}")
 
 
 def build_cover(ws, _years):
-    ws["A1"] = "Cover"
-    ws["A1"].font = TITLE_FONT
+    apply_sheet_defaults(ws, "Cover")
     rows = [
         ("Company Name",  "=inp_company_name",  TEXT),
         ("Ticker",        "=inp_ticker",        TEXT),
@@ -220,478 +361,608 @@ def build_cover(ws, _years):
         ("Market Cap",    "=mkt_cap",           NUM),
     ]
     for i, (label, formula, fmt) in enumerate(rows):
-        r = 3 + i
-        ws.cell(r, 1, label).font = LABEL_BOLD
-        c = ws.cell(r, 2, formula)
+        r = 4 + i
+        style_label(ws.cell(r, 2, label), bold=True)
+        c = ws.cell(r, 3, formula)
         style_link(c, num_format=fmt)
-    ws.column_dimensions["A"].width = 28
     ws.column_dimensions["B"].width = 28
+    ws.column_dimensions["C"].width = 28
 
 
 def _is_proj(years, i):
     return years[i][1].endswith("E")
 
 
-def _set_year_headers(ws, years, projection_only=False):
+def _set_year_headers(ws, years, header_row, projection_only=False):
     for i, (_yr, lbl) in enumerate(years):
         if projection_only and not lbl.endswith("E"):
             continue
-        style_header(ws.cell(1, i + 2, lbl))
+        style_header(ws.cell(header_row, i + 3, lbl))
 
 
 def _set_widths(ws, n):
-    ws.column_dimensions["A"].width = 35
+    ws.column_dimensions["B"].width = 35
     for i in range(n):
         ws.column_dimensions[col(i)].width = 14
 
 
 def build_is(ws, years):
+    apply_sheet_defaults(ws, "Income Statement")
     n = len(years)
-    _set_year_headers(ws, years)
+    _set_year_headers(ws, years, IS_ROW_HEADER)
 
-    ws.cell(2, 1, "Revenue")
+    style_label(ws.cell(IS_ROW_REV, 2, "Revenue"))
     for i in range(n):
         cur = col(i)
         if not _is_proj(years, i):
-            style_link(ws.cell(2, i + 2, f"=_CapIQ_Data!{cur}25"))
+            style_link(ws.cell(IS_ROW_REV, i + 3, f"=_CapIQ_Data!{cur}31"))
         else:
             prev = col(i - 1)
-            style_formula(ws.cell(2, i + 2, f"={prev}2*(1+Inputs!{cur}${DRV_REV})"))
+            style_formula(ws.cell(IS_ROW_REV, i + 3, f"={prev}{IS_ROW_REV}*(1+Inputs!{cur}${DRV_REV})"))
 
-    ws.cell(3, 1, "Revenue Growth %")
+    style_label(ws.cell(IS_ROW_GROWTH, 2, "Revenue Growth %"))
     for i in range(n):
         cur = col(i)
         if i == 0:
-            ws.cell(3, i + 2, None)
+            ws.cell(IS_ROW_GROWTH, i + 3, None)
         else:
             prev = col(i - 1)
-            style_formula(ws.cell(3, i + 2, f"={cur}2/{prev}2-1"), num_format=PCT)
+            style_formula(
+                ws.cell(IS_ROW_GROWTH, i + 3, f"={cur}{IS_ROW_REV}/{prev}{IS_ROW_REV}-1"),
+                num_format=PCT,
+            )
 
-    ws.cell(4, 1, "COGS")
+    style_label(ws.cell(IS_ROW_COGS, 2, "COGS"))
     for i in range(n):
         cur = col(i)
         if not _is_proj(years, i):
-            style_link(ws.cell(4, i + 2, f"=_CapIQ_Data!{cur}26"))
+            style_link(ws.cell(IS_ROW_COGS, i + 3, f"=_CapIQ_Data!{cur}32"))
         else:
-            style_formula(ws.cell(4, i + 2, f"={cur}2*(1-Inputs!{cur}${DRV_GM})"))
+            style_formula(ws.cell(IS_ROW_COGS, i + 3, f"={cur}{IS_ROW_REV}*(1-Inputs!{cur}${DRV_GM})"))
 
-    ws.cell(5, 1, "Gross Profit")
+    style_label(ws.cell(IS_ROW_GP, 2, "Gross Profit"))
     for i in range(n):
         cur = col(i)
-        style_subtotal(ws.cell(5, i + 2, f"={cur}2-{cur}4"))
+        style_subtotal(ws.cell(IS_ROW_GP, i + 3, f"={cur}{IS_ROW_REV}-{cur}{IS_ROW_COGS}"))
 
-    ws.cell(6, 1, "Gross Margin %")
+    style_label(ws.cell(IS_ROW_GM, 2, "Gross Margin %"))
     for i in range(n):
         cur = col(i)
-        style_formula(ws.cell(6, i + 2, f"=IFERROR({cur}5/{cur}2,0)"), num_format=PCT)
+        style_formula(
+            ws.cell(IS_ROW_GM, i + 3, f"=IFERROR({cur}{IS_ROW_GP}/{cur}{IS_ROW_REV},0)"),
+            num_format=PCT,
+        )
 
-    ws.cell(7, 1, "Total OpEx")
+    style_label(ws.cell(IS_ROW_OPEX, 2, "Total OpEx"))
     for i in range(n):
         cur = col(i)
         if not _is_proj(years, i):
-            style_link(ws.cell(7, i + 2, f"=_CapIQ_Data!{cur}30"))
+            style_link(ws.cell(IS_ROW_OPEX, i + 3, f"=_CapIQ_Data!{cur}34"))
         else:
-            style_formula(ws.cell(7, i + 2, f"={cur}2*Inputs!{cur}${DRV_OPEX}"))
+            style_formula(ws.cell(IS_ROW_OPEX, i + 3, f"={cur}{IS_ROW_REV}*Inputs!{cur}${DRV_OPEX}"))
 
-    ws.cell(8, 1, "EBITDA")
+    style_label(ws.cell(IS_ROW_EBITDA, 2, "EBITDA"))
     for i in range(n):
         cur = col(i)
-        style_subtotal(ws.cell(8, i + 2, f"={cur}5-{cur}7"))
+        style_subtotal(ws.cell(IS_ROW_EBITDA, i + 3, f"={cur}{IS_ROW_GP}-{cur}{IS_ROW_OPEX}"))
 
-    ws.cell(9, 1, "EBITDA Margin %")
+    style_label(ws.cell(IS_ROW_EBITDAM, 2, "EBITDA Margin %"))
     for i in range(n):
         cur = col(i)
-        style_formula(ws.cell(9, i + 2, f"=IFERROR({cur}8/{cur}2,0)"), num_format=PCT)
+        style_formula(
+            ws.cell(IS_ROW_EBITDAM, i + 3, f"=IFERROR({cur}{IS_ROW_EBITDA}/{cur}{IS_ROW_REV},0)"),
+            num_format=PCT,
+        )
 
-    ws.cell(10, 1, "D&A")
+    style_label(ws.cell(IS_ROW_DA, 2, "D&A"))
     for i in range(n):
         cur = col(i)
         if not _is_proj(years, i):
-            style_link(ws.cell(10, i + 2, f"=_CapIQ_Data!{cur}31"))
+            style_link(ws.cell(IS_ROW_DA, i + 3, f"=_CapIQ_Data!{cur}35"))
         else:
             # CapEx on CF is negative; negate, then multiply by D&A%
-            style_link(ws.cell(10, i + 2, f"=-CF!{cur}5*Inputs!{cur}${DRV_DA}"))
+            style_link(
+                ws.cell(IS_ROW_DA, i + 3, f"=-CF!{cur}{CF_ROW_CAPEX}*Inputs!{cur}${DRV_DA}")
+            )
 
-    ws.cell(11, 1, "EBIT")
+    style_label(ws.cell(IS_ROW_EBIT, 2, "EBIT"))
     for i in range(n):
         cur = col(i)
-        style_subtotal(ws.cell(11, i + 2, f"={cur}8-{cur}10"))
+        style_subtotal(ws.cell(IS_ROW_EBIT, i + 3, f"={cur}{IS_ROW_EBITDA}-{cur}{IS_ROW_DA}"))
 
-    ws.cell(12, 1, "EBIT Margin %")
+    style_label(ws.cell(IS_ROW_EBITM, 2, "EBIT Margin %"))
     for i in range(n):
         cur = col(i)
-        style_formula(ws.cell(12, i + 2, f"=IFERROR({cur}11/{cur}2,0)"), num_format=PCT)
+        style_formula(
+            ws.cell(IS_ROW_EBITM, i + 3, f"=IFERROR({cur}{IS_ROW_EBIT}/{cur}{IS_ROW_REV},0)"),
+            num_format=PCT,
+        )
 
-    ws.cell(13, 1, "Interest Expense")
+    # Per spec: leave historical cells blank for IntExp / IntInc / Pretax / Tax / NI.
+    style_label(ws.cell(IS_ROW_INTEXP, 2, "Interest Expense"))
     for i in range(n):
         cur = col(i)
         if not _is_proj(years, i):
-            style_link(ws.cell(13, i + 2, f"=_CapIQ_Data!{cur}34"))
+            ws.cell(IS_ROW_INTEXP, i + 3, None)
         else:
-            style_link(ws.cell(13, i + 2, f"=Debt!{cur}30"))
+            style_link(ws.cell(IS_ROW_INTEXP, i + 3, f"=Debt!{cur}{DEBT_ROW_TOT_INT}"))
 
-    ws.cell(14, 1, "Interest Income")
+    style_label(ws.cell(IS_ROW_INTINC, 2, "Interest Income"))
     first_proj = next(j for j, (_y, l) in enumerate(years) if l.endswith("E"))
     for i in range(n):
         cur = col(i)
         if not _is_proj(years, i):
-            style_link(ws.cell(14, i + 2, f"=_CapIQ_Data!{cur}35"))
+            ws.cell(IS_ROW_INTINC, i + 3, None)
         elif i == first_proj:
-            style_input(ws.cell(14, i + 2, 0))
+            style_input(ws.cell(IS_ROW_INTINC, i + 3, 0))
         else:
             prev = col(i - 1)
-            style_formula(ws.cell(14, i + 2, f"={prev}14"))
+            style_formula(ws.cell(IS_ROW_INTINC, i + 3, f"={prev}{IS_ROW_INTINC}"))
 
-    ws.cell(15, 1, "Pre-tax Income")
-    for i in range(n):
-        cur = col(i)
-        style_subtotal(ws.cell(15, i + 2, f"={cur}11-{cur}13+{cur}14"))
-
-    ws.cell(16, 1, "Taxes")
-    for i in range(n):
-        cur = col(i)
-        style_formula(ws.cell(16, i + 2, f"={cur}15*inp_tax_rate"))
-
-    ws.cell(17, 1, "Effective Tax Rate %")
-    for i in range(n):
-        cur = col(i)
-        style_formula(ws.cell(17, i + 2, f"=IFERROR({cur}16/{cur}15,0)"), num_format=PCT)
-
-    ws.cell(18, 1, "Net Income")
-    for i in range(n):
-        cur = col(i)
-        style_subtotal(ws.cell(18, i + 2, f"={cur}15-{cur}16"))
-
-    ws.cell(19, 1, "Diluted Shares Outstanding")
+    style_label(ws.cell(IS_ROW_PRETAX, 2, "Pre-tax Income"))
     for i in range(n):
         cur = col(i)
         if not _is_proj(years, i):
-            style_link(ws.cell(19, i + 2, f"=_CapIQ_Data!{cur}39"))
+            ws.cell(IS_ROW_PRETAX, i + 3, None)
         else:
-            style_link(ws.cell(19, i + 2, "=inp_diluted_shares"))
+            style_subtotal(
+                ws.cell(IS_ROW_PRETAX, i + 3,
+                        f"={cur}{IS_ROW_EBIT}-{cur}{IS_ROW_INTEXP}+{cur}{IS_ROW_INTINC}")
+            )
 
-    ws.cell(20, 1, "Diluted EPS")
+    style_label(ws.cell(IS_ROW_TAX, 2, "Taxes"))
     for i in range(n):
         cur = col(i)
-        style_formula(ws.cell(20, i + 2, f"=IFERROR({cur}18/{cur}19,0)"), num_format=NUM_DEC)
+        if not _is_proj(years, i):
+            ws.cell(IS_ROW_TAX, i + 3, None)
+        else:
+            style_formula(ws.cell(IS_ROW_TAX, i + 3, f"={cur}{IS_ROW_PRETAX}*inp_tax_rate"))
 
-    ws.freeze_panes = "B2"
+    style_label(ws.cell(IS_ROW_ETR, 2, "Effective Tax Rate %"))
+    for i in range(n):
+        cur = col(i)
+        if not _is_proj(years, i):
+            ws.cell(IS_ROW_ETR, i + 3, None)
+        else:
+            style_formula(
+                ws.cell(IS_ROW_ETR, i + 3,
+                        f"=IFERROR({cur}{IS_ROW_TAX}/{cur}{IS_ROW_PRETAX},0)"),
+                num_format=PCT,
+            )
+
+    style_label(ws.cell(IS_ROW_NI, 2, "Net Income"))
+    for i in range(n):
+        cur = col(i)
+        if not _is_proj(years, i):
+            ws.cell(IS_ROW_NI, i + 3, None)
+        else:
+            style_subtotal(
+                ws.cell(IS_ROW_NI, i + 3, f"={cur}{IS_ROW_PRETAX}-{cur}{IS_ROW_TAX}")
+            )
+
+    # Diluted shares: hold flat across all 13 columns (no historical link).
+    style_label(ws.cell(IS_ROW_SHARES, 2, "Diluted Shares Outstanding"))
+    for i in range(n):
+        style_link(ws.cell(IS_ROW_SHARES, i + 3, "=inp_diluted_shares"))
+
+    style_label(ws.cell(IS_ROW_EPS, 2, "Diluted EPS"))
+    for i in range(n):
+        cur = col(i)
+        style_formula(
+            ws.cell(IS_ROW_EPS, i + 3, f"=IFERROR({cur}{IS_ROW_NI}/{cur}{IS_ROW_SHARES},0)"),
+            num_format=NUM_DEC,
+        )
+
+    ws.freeze_panes = "C5"
     _set_widths(ws, n)
 
 
 def build_cf(ws, years):
+    apply_sheet_defaults(ws, "Cash Flow")
     n = len(years)
-    _set_year_headers(ws, years)
+    _set_year_headers(ws, years, CF_ROW_HEADER)
 
-    ws.cell(2, 1, "EBITDA")
+    style_label(ws.cell(CF_ROW_EBITDA, 2, "EBITDA"))
     for i in range(n):
         cur = col(i)
-        style_link(ws.cell(2, i + 2, f"=IS!{cur}8"))
+        style_link(ws.cell(CF_ROW_EBITDA, i + 3, f"=IS!{cur}{IS_ROW_EBITDA}"))
 
-    ws.cell(3, 1, "(Less) Cash Taxes")
-    for i in range(n):
-        cur = col(i)
-        style_link(ws.cell(3, i + 2, f"=-IS!{cur}16"))
-
-    ws.cell(4, 1, "(Less) Cash Interest")
-    for i in range(n):
-        cur = col(i)
-        style_link(ws.cell(4, i + 2, f"=-IS!{cur}13"))
-
-    ws.cell(5, 1, "(Less) CapEx")
+    style_label(ws.cell(CF_ROW_TAXES, 2, "(Less) Cash Taxes"))
     for i in range(n):
         cur = col(i)
         if not _is_proj(years, i):
-            style_link(ws.cell(5, i + 2, f"=-_CapIQ_Data!{cur}40"))
+            ws.cell(CF_ROW_TAXES, i + 3, None)
         else:
-            style_formula(ws.cell(5, i + 2, f"=-IS!{cur}2*Inputs!{cur}${DRV_CAPEX}"))
+            style_link(ws.cell(CF_ROW_TAXES, i + 3, f"=-IS!{cur}{IS_ROW_TAX}"))
 
-    ws.cell(6, 1, "Levered Free Cash Flow")
+    style_label(ws.cell(CF_ROW_INTEREST, 2, "(Less) Cash Interest"))
     for i in range(n):
         cur = col(i)
-        style_subtotal(ws.cell(6, i + 2, f"=SUM({cur}2:{cur}5)"))
+        if not _is_proj(years, i):
+            ws.cell(CF_ROW_INTEREST, i + 3, None)
+        else:
+            style_link(ws.cell(CF_ROW_INTEREST, i + 3, f"=-IS!{cur}{IS_ROW_INTEXP}"))
 
-    ws.cell(7, 1, "(Less) Debt Amortization")
+    style_label(ws.cell(CF_ROW_CAPEX, 2, "(Less) CapEx"))
     for i in range(n):
         cur = col(i)
-        style_link(ws.cell(7, i + 2, f"=-(Debt!{cur}31+Debt!{cur}32)"))
+        if not _is_proj(years, i):
+            style_link(ws.cell(CF_ROW_CAPEX, i + 3, f"=-_CapIQ_Data!{cur}38"))
+        else:
+            style_formula(
+                ws.cell(CF_ROW_CAPEX, i + 3, f"=-IS!{cur}{IS_ROW_REV}*Inputs!{cur}${DRV_CAPEX}")
+            )
 
-    ws.cell(8, 1, "(Less) Dividends")
+    style_label(ws.cell(CF_ROW_LFCF, 2, "Levered Free Cash Flow"))
+    for i in range(n):
+        cur = col(i)
+        style_subtotal(
+            ws.cell(CF_ROW_LFCF, i + 3,
+                    f"=SUM({cur}{CF_ROW_EBITDA}:{cur}{CF_ROW_CAPEX})")
+        )
+
+    style_label(ws.cell(CF_ROW_DEBT_AMORT, 2, "(Less) Debt Amortization"))
+    for i in range(n):
+        cur = col(i)
+        if not _is_proj(years, i):
+            ws.cell(CF_ROW_DEBT_AMORT, i + 3, None)
+        else:
+            style_link(
+                ws.cell(CF_ROW_DEBT_AMORT, i + 3,
+                        f"=-(Debt!{cur}{DEBT_ROW_TOT_AMORT}+Debt!{cur}{DEBT_ROW_TOT_PREP})")
+            )
+
+    style_label(ws.cell(CF_ROW_DIVIDENDS, 2, "(Less) Dividends"))
     first_proj = next(j for j, (_y, l) in enumerate(years) if l.endswith("E"))
     for i in range(n):
         cur = col(i)
         if not _is_proj(years, i):
-            style_input(ws.cell(8, i + 2, 0))
+            style_input(ws.cell(CF_ROW_DIVIDENDS, i + 3, 0))
         else:
             k = i - first_proj  # 0 for first projection year
-            f = f"=-(inp_quarterly_dps*4)*((1+inp_dps_growth)^{k})*IS!{cur}19"
-            style_formula(ws.cell(8, i + 2, f))
+            f = f"=-inp_annual_dps*((1+inp_dps_growth)^{k})*IS!{cur}{IS_ROW_SHARES}"
+            style_formula(ws.cell(CF_ROW_DIVIDENDS, i + 3, f))
 
-    ws.cell(9, 1, "Net Change in Cash")
+    style_label(ws.cell(CF_ROW_NETCHG, 2, "Net Change in Cash"))
     for i in range(n):
         cur = col(i)
-        style_subtotal(ws.cell(9, i + 2, f"={cur}6+{cur}7+{cur}8"))
+        style_subtotal(
+            ws.cell(CF_ROW_NETCHG, i + 3,
+                    f"={cur}{CF_ROW_LFCF}+{cur}{CF_ROW_DEBT_AMORT}+{cur}{CF_ROW_DIVIDENDS}")
+        )
 
-    ws.cell(10, 1, "Beginning Cash")
+    style_label(ws.cell(CF_ROW_BEGCASH, 2, "Beginning Cash"))
     for i in range(n):
         cur = col(i)
         if i == 0:
-            style_input(ws.cell(10, i + 2, 0))
+            style_input(ws.cell(CF_ROW_BEGCASH, i + 3, 0))
         else:
             prev = col(i - 1)
-            style_formula(ws.cell(10, i + 2, f"={prev}11"))
+            style_formula(ws.cell(CF_ROW_BEGCASH, i + 3, f"={prev}{CF_ROW_ENDCASH}"))
 
-    ws.cell(11, 1, "Ending Cash")
+    style_label(ws.cell(CF_ROW_ENDCASH, 2, "Ending Cash"))
     for i in range(n):
         cur = col(i)
-        style_subtotal(ws.cell(11, i + 2, f"={cur}10+{cur}9"))
+        style_subtotal(
+            ws.cell(CF_ROW_ENDCASH, i + 3,
+                    f"={cur}{CF_ROW_BEGCASH}+{cur}{CF_ROW_NETCHG}")
+        )
 
-    ws.freeze_panes = "B2"
+    ws.freeze_panes = "C5"
     _set_widths(ws, n)
 
 
 def build_debt(ws, years):
+    apply_sheet_defaults(ws, "Debt Schedule")
     n = len(years)
-    _set_year_headers(ws, years)
+    _set_year_headers(ws, years, DEBT_ROW_HEADER)
 
-    # Block 1: Revolver
-    ws.cell(2, 1, "Revolver").font = SECTION_FONT
-    ws.cell(3, 1, "Beginning Balance")
-    ws.cell(4, 1, "Draws")
-    ws.cell(5, 1, "Repayments")
-    ws.cell(6, 1, "Ending Balance")
-    ws.cell(7, 1, "Average Balance")
-    ws.cell(8, 1, "Interest Rate %")
-    ws.cell(9, 1, "Interest Expense")
+    style_label(ws.cell(DEBT_ROW_REVOLVER, 2, "Revolver"), bold=True)
+    style_label(ws.cell(DEBT_ROW_REV_BEG,   2, "Beginning Balance"))
+    style_label(ws.cell(DEBT_ROW_REV_DRAW,  2, "Draws"))
+    style_label(ws.cell(DEBT_ROW_REV_REPAY, 2, "Repayments"))
+    style_label(ws.cell(DEBT_ROW_REV_END,   2, "Ending Balance"))
+    style_label(ws.cell(DEBT_ROW_REV_AVG,   2, "Average Balance"))
+    style_label(ws.cell(DEBT_ROW_REV_RATE,  2, "Interest Rate %"))
+    style_label(ws.cell(DEBT_ROW_REV_INT,   2, "Interest Expense"))
     for i in range(n):
         cur = col(i)
         if i == 0:
-            style_input(ws.cell(3, i + 2, 0))
+            style_input(ws.cell(DEBT_ROW_REV_BEG, i + 3, 0))
         else:
             prev = col(i - 1)
-            style_formula(ws.cell(3, i + 2, f"={prev}6"))
-        style_input(ws.cell(4, i + 2, 0))
-        style_input(ws.cell(5, i + 2, 0))
-        style_subtotal(ws.cell(6, i + 2, f"={cur}3+{cur}4-{cur}5"))
-        style_formula(ws.cell(7, i + 2, f"=({cur}3+{cur}6)/2"))
-        style_input(ws.cell(8, i + 2, 0.06), num_format=PCT)
-        style_formula(ws.cell(9, i + 2, f"={cur}7*{cur}8"))
+            style_formula(ws.cell(DEBT_ROW_REV_BEG, i + 3, f"={prev}{DEBT_ROW_REV_END}"))
+        style_input(ws.cell(DEBT_ROW_REV_DRAW, i + 3, 0))
+        style_input(ws.cell(DEBT_ROW_REV_REPAY, i + 3, 0))
+        style_subtotal(
+            ws.cell(DEBT_ROW_REV_END, i + 3,
+                    f"={cur}{DEBT_ROW_REV_BEG}+{cur}{DEBT_ROW_REV_DRAW}-{cur}{DEBT_ROW_REV_REPAY}")
+        )
+        style_formula(
+            ws.cell(DEBT_ROW_REV_AVG, i + 3,
+                    f"=({cur}{DEBT_ROW_REV_BEG}+{cur}{DEBT_ROW_REV_END})/2")
+        )
+        style_input(ws.cell(DEBT_ROW_REV_RATE, i + 3, 0.06), num_format=PCT)
+        style_formula(
+            ws.cell(DEBT_ROW_REV_INT, i + 3,
+                    f"={cur}{DEBT_ROW_REV_AVG}*{cur}{DEBT_ROW_REV_RATE}")
+        )
 
-    # Block 2: Term Loan
-    ws.cell(11, 1, "Term Loan").font = SECTION_FONT
-    ws.cell(12, 1, "Beginning Balance")
-    ws.cell(13, 1, "Mandatory Amortization")
-    ws.cell(14, 1, "Optional Prepayment (Cash Sweep)")
-    ws.cell(15, 1, "Ending Balance")
-    ws.cell(16, 1, "Average Balance")
-    ws.cell(17, 1, "Interest Rate %")
-    ws.cell(18, 1, "Interest Expense")
+    style_label(ws.cell(DEBT_ROW_TL_TITLE, 2, "Term Loan"), bold=True)
+    style_label(ws.cell(DEBT_ROW_TL_BEG,    2, "Beginning Balance"))
+    style_label(ws.cell(DEBT_ROW_TL_AMORT,  2, "Mandatory Amortization"))
+    style_label(ws.cell(DEBT_ROW_TL_PREPAY, 2, "Optional Prepayment (Cash Sweep)"))
+    style_label(ws.cell(DEBT_ROW_TL_END,    2, "Ending Balance"))
+    style_label(ws.cell(DEBT_ROW_TL_AVG,    2, "Average Balance"))
+    style_label(ws.cell(DEBT_ROW_TL_RATE,   2, "Interest Rate %"))
+    style_label(ws.cell(DEBT_ROW_TL_INT,    2, "Interest Expense"))
     for i in range(n):
         cur = col(i)
         if i == 0:
-            style_input(ws.cell(12, i + 2, 0))
+            style_input(ws.cell(DEBT_ROW_TL_BEG, i + 3, 0))
         else:
             prev = col(i - 1)
-            style_formula(ws.cell(12, i + 2, f"={prev}15"))
-        style_input(ws.cell(13, i + 2, 0))
+            style_formula(ws.cell(DEBT_ROW_TL_BEG, i + 3, f"={prev}{DEBT_ROW_TL_END}"))
+        style_input(ws.cell(DEBT_ROW_TL_AMORT, i + 3, 0))
         if not _is_proj(years, i):
-            style_formula(ws.cell(14, i + 2, 0))
+            style_formula(ws.cell(DEBT_ROW_TL_PREPAY, i + 3, 0))
         else:
-            style_link(ws.cell(14, i + 2, f"={cur}37"))
-        style_subtotal(ws.cell(15, i + 2, f"={cur}12-{cur}13-{cur}14"))
-        style_formula(ws.cell(16, i + 2, f"=({cur}12+{cur}15)/2"))
-        style_input(ws.cell(17, i + 2, 0.07), num_format=PCT)
-        style_formula(ws.cell(18, i + 2, f"={cur}16*{cur}17"))
+            style_link(ws.cell(DEBT_ROW_TL_PREPAY, i + 3, f"={cur}{DEBT_ROW_SW_TL}"))
+        style_subtotal(
+            ws.cell(DEBT_ROW_TL_END, i + 3,
+                    f"={cur}{DEBT_ROW_TL_BEG}-{cur}{DEBT_ROW_TL_AMORT}-{cur}{DEBT_ROW_TL_PREPAY}")
+        )
+        style_formula(
+            ws.cell(DEBT_ROW_TL_AVG, i + 3,
+                    f"=({cur}{DEBT_ROW_TL_BEG}+{cur}{DEBT_ROW_TL_END})/2")
+        )
+        style_input(ws.cell(DEBT_ROW_TL_RATE, i + 3, 0.07), num_format=PCT)
+        style_formula(
+            ws.cell(DEBT_ROW_TL_INT, i + 3,
+                    f"={cur}{DEBT_ROW_TL_AVG}*{cur}{DEBT_ROW_TL_RATE}")
+        )
 
-    # Block 3: Senior Notes
-    ws.cell(20, 1, "Senior Notes").font = SECTION_FONT
-    ws.cell(21, 1, "Beginning Balance")
-    ws.cell(22, 1, "Repayment at Maturity")
-    ws.cell(23, 1, "Ending Balance")
-    ws.cell(24, 1, "Interest Rate %")
-    ws.cell(25, 1, "Interest Expense")
+    style_label(ws.cell(DEBT_ROW_SN_TITLE, 2, "Senior Notes"), bold=True)
+    style_label(ws.cell(DEBT_ROW_SN_BEG,   2, "Beginning Balance"))
+    style_label(ws.cell(DEBT_ROW_SN_REPAY, 2, "Repayment at Maturity"))
+    style_label(ws.cell(DEBT_ROW_SN_END,   2, "Ending Balance"))
+    style_label(ws.cell(DEBT_ROW_SN_RATE,  2, "Interest Rate %"))
+    style_label(ws.cell(DEBT_ROW_SN_INT,   2, "Interest Expense"))
     for i in range(n):
         cur = col(i)
         if i == 0:
-            style_input(ws.cell(21, i + 2, 0))
+            style_input(ws.cell(DEBT_ROW_SN_BEG, i + 3, 0))
         else:
             prev = col(i - 1)
-            style_formula(ws.cell(21, i + 2, f"={prev}23"))
-        style_input(ws.cell(22, i + 2, 0))
-        style_subtotal(ws.cell(23, i + 2, f"={cur}21-{cur}22"))
-        style_input(ws.cell(24, i + 2, 0.05), num_format=PCT)
-        style_formula(ws.cell(25, i + 2, f"={cur}21*{cur}24"))
+            style_formula(ws.cell(DEBT_ROW_SN_BEG, i + 3, f"={prev}{DEBT_ROW_SN_END}"))
+        style_input(ws.cell(DEBT_ROW_SN_REPAY, i + 3, 0))
+        style_subtotal(
+            ws.cell(DEBT_ROW_SN_END, i + 3,
+                    f"={cur}{DEBT_ROW_SN_BEG}-{cur}{DEBT_ROW_SN_REPAY}")
+        )
+        style_input(ws.cell(DEBT_ROW_SN_RATE, i + 3, 0.05), num_format=PCT)
+        style_formula(
+            ws.cell(DEBT_ROW_SN_INT, i + 3,
+                    f"={cur}{DEBT_ROW_SN_BEG}*{cur}{DEBT_ROW_SN_RATE}")
+        )
 
-    # Block 4: Totals
-    ws.cell(27, 1, "Totals").font = SECTION_FONT
-    ws.cell(28, 1, "Total Beginning Debt")
-    ws.cell(29, 1, "Total Ending Debt")
-    ws.cell(30, 1, "Total Interest Expense")
-    ws.cell(31, 1, "Total Mandatory Amortization")
-    ws.cell(32, 1, "Total Optional Prepayment")
+    style_label(ws.cell(DEBT_ROW_TOT_TITLE, 2, "Totals"), bold=True)
+    style_label(ws.cell(DEBT_ROW_TOT_BEG,   2, "Total Beginning Debt"))
+    style_label(ws.cell(DEBT_ROW_TOT_END,   2, "Total Ending Debt"))
+    style_label(ws.cell(DEBT_ROW_TOT_INT,   2, "Total Interest Expense"))
+    style_label(ws.cell(DEBT_ROW_TOT_AMORT, 2, "Total Mandatory Amortization"))
+    style_label(ws.cell(DEBT_ROW_TOT_PREP,  2, "Total Optional Prepayment"))
     for i in range(n):
         cur = col(i)
-        style_subtotal(ws.cell(28, i + 2, f"={cur}3+{cur}12+{cur}21"))
-        style_subtotal(ws.cell(29, i + 2, f"={cur}6+{cur}15+{cur}23"))
-        style_subtotal(ws.cell(30, i + 2, f"={cur}9+{cur}18+{cur}25"))
-        style_formula(ws.cell(31, i + 2, f"={cur}13"))
-        style_formula(ws.cell(32, i + 2, f"={cur}14"))
+        style_subtotal(
+            ws.cell(DEBT_ROW_TOT_BEG, i + 3,
+                    f"={cur}{DEBT_ROW_REV_BEG}+{cur}{DEBT_ROW_TL_BEG}+{cur}{DEBT_ROW_SN_BEG}")
+        )
+        style_subtotal(
+            ws.cell(DEBT_ROW_TOT_END, i + 3,
+                    f"={cur}{DEBT_ROW_REV_END}+{cur}{DEBT_ROW_TL_END}+{cur}{DEBT_ROW_SN_END}")
+        )
+        style_subtotal(
+            ws.cell(DEBT_ROW_TOT_INT, i + 3,
+                    f"={cur}{DEBT_ROW_REV_INT}+{cur}{DEBT_ROW_TL_INT}+{cur}{DEBT_ROW_SN_INT}")
+        )
+        style_formula(
+            ws.cell(DEBT_ROW_TOT_AMORT, i + 3, f"={cur}{DEBT_ROW_TL_AMORT}")
+        )
+        style_formula(
+            ws.cell(DEBT_ROW_TOT_PREP, i + 3, f"={cur}{DEBT_ROW_TL_PREPAY}")
+        )
 
-    # Block 5: Cash Sweep
-    ws.cell(34, 1, "Cash Sweep").font = SECTION_FONT
-    ws.cell(35, 1, "Available Cash for Sweep")
-    ws.cell(36, 1, "Cash Sweep Applied")
-    ws.cell(37, 1, "Allocated to Term Loan")
+    style_label(ws.cell(DEBT_ROW_SW_TITLE, 2, "Cash Sweep"), bold=True)
+    style_label(ws.cell(DEBT_ROW_SW_AVAIL, 2, "Available Cash for Sweep"))
+    style_label(ws.cell(DEBT_ROW_SW_APPLY, 2, "Cash Sweep Applied"))
+    style_label(ws.cell(DEBT_ROW_SW_TL,    2, "Allocated to Term Loan"))
     for i in range(n):
         cur = col(i)
         if not _is_proj(years, i):
-            style_formula(ws.cell(35, i + 2, 0))
-            style_formula(ws.cell(36, i + 2, 0))
-            style_formula(ws.cell(37, i + 2, 0))
+            style_formula(ws.cell(DEBT_ROW_SW_AVAIL, i + 3, 0))
+            style_formula(ws.cell(DEBT_ROW_SW_APPLY, i + 3, 0))
+            style_formula(ws.cell(DEBT_ROW_SW_TL,    i + 3, 0))
         else:
-            style_formula(ws.cell(35, i + 2, f"=MAX(0,CF!{cur}11-inp_min_cash)"))
-            style_formula(ws.cell(36, i + 2, f"={cur}35*inp_cash_sweep_pct"))
-            style_formula(ws.cell(37, i + 2, f"={cur}36"))
+            style_formula(
+                ws.cell(DEBT_ROW_SW_AVAIL, i + 3,
+                        f"=MAX(0,CF!{cur}{CF_ROW_ENDCASH}-inp_min_cash)")
+            )
+            style_formula(
+                ws.cell(DEBT_ROW_SW_APPLY, i + 3,
+                        f"={cur}{DEBT_ROW_SW_AVAIL}*inp_cash_sweep_pct")
+            )
+            style_formula(
+                ws.cell(DEBT_ROW_SW_TL, i + 3, f"={cur}{DEBT_ROW_SW_APPLY}")
+            )
 
-    ws.freeze_panes = "B2"
+    ws.freeze_panes = "C5"
     _set_widths(ws, n)
 
 
 def build_valuation(ws, years):
+    apply_sheet_defaults(ws, "Valuation")
     n = len(years)
-    _set_year_headers(ws, years, projection_only=True)
+    _set_year_headers(ws, years, VAL_ROW_HEADER, projection_only=True)
 
     proj_indices = [i for i, (_y, lbl) in enumerate(years) if lbl.endswith("E")]
-    ws.cell(2, 1, "Year-end EBITDA")
-    ws.cell(3, 1, "Exit EBITDA Multiple")
-    ws.cell(4, 1, "Implied Enterprise Value")
-    ws.cell(5, 1, "(Less) Year-end Total Debt")
-    ws.cell(6, 1, "Plus: Year-end Cash")
-    ws.cell(7, 1, "(Less) Minority Interest")
-    ws.cell(8, 1, "Plus: Equity Investments")
-    ws.cell(9, 1, "Implied Equity Value")
-    ws.cell(10, 1, "/ Diluted Shares Outstanding")
-    ws.cell(11, 1, "Implied Price per Share")
-    ws.cell(12, 1, "Implied IRR from Today")
-    ws.cell(13, 1, "Implied MOIC")
+    style_label(ws.cell(VAL_ROW_EBITDA, 2, "Year-end EBITDA"))
+    style_label(ws.cell(VAL_ROW_MULT,   2, "Exit EBITDA Multiple"))
+    style_label(ws.cell(VAL_ROW_EV,     2, "Implied Enterprise Value"))
+    style_label(ws.cell(VAL_ROW_DEBT,   2, "(Less) Year-end Total Debt"))
+    style_label(ws.cell(VAL_ROW_CASH,   2, "Plus: Year-end Cash"))
+    style_label(ws.cell(VAL_ROW_NCI,    2, "(Less) Minority Interest"))
+    style_label(ws.cell(VAL_ROW_EQINV,  2, "Plus: Equity Investments"))
+    style_label(ws.cell(VAL_ROW_EQUITY, 2, "Implied Equity Value"))
+    style_label(ws.cell(VAL_ROW_SHARES, 2, "/ Diluted Shares Outstanding"))
+    style_label(ws.cell(VAL_ROW_PPS,    2, "Implied Price per Share"))
+    style_label(ws.cell(VAL_ROW_IRR,    2, "Implied IRR from Today"))
+    style_label(ws.cell(VAL_ROW_MOIC,   2, "Implied MOIC"))
 
     for k, i in enumerate(proj_indices):
         cur = col(i)
-        style_link(ws.cell(2, i + 2, f"=IS!{cur}8"))
-        style_link(ws.cell(3, i + 2, f"=Inputs!{cur}${DRV_EXIT}"), num_format=MULT)
-        style_subtotal(ws.cell(4, i + 2, f"={cur}2*{cur}3"))
-        style_link(ws.cell(5, i + 2, f"=-Debt!{cur}29"))
-        style_link(ws.cell(6, i + 2, f"=CF!{cur}11"))
-        style_link(ws.cell(7, i + 2, "=-inp_minority_interest"))
-        style_link(ws.cell(8, i + 2, "=inp_equity_investments"))
-        style_subtotal(ws.cell(9, i + 2, f"={cur}4+{cur}5+{cur}6+{cur}7+{cur}8"))
-        style_link(ws.cell(10, i + 2, f"=IS!{cur}19"))
-        style_subtotal(ws.cell(11, i + 2, f"=IFERROR({cur}9/{cur}10,0)"), num_format=NUM_DEC)
+        style_link(ws.cell(VAL_ROW_EBITDA, i + 3, f"=IS!{cur}{IS_ROW_EBITDA}"))
+        style_link(ws.cell(VAL_ROW_MULT, i + 3, f"=Inputs!{cur}${DRV_EXIT}"), num_format=MULT)
+        style_subtotal(ws.cell(VAL_ROW_EV, i + 3, f"={cur}{VAL_ROW_EBITDA}*{cur}{VAL_ROW_MULT}"))
+        style_link(ws.cell(VAL_ROW_DEBT, i + 3, f"=-Debt!{cur}{DEBT_ROW_TOT_END}"))
+        style_link(ws.cell(VAL_ROW_CASH, i + 3, f"=CF!{cur}{CF_ROW_ENDCASH}"))
+        style_link(ws.cell(VAL_ROW_NCI, i + 3, "=-inp_minority_interest"))
+        style_link(ws.cell(VAL_ROW_EQINV, i + 3, "=inp_equity_investments"))
+        style_subtotal(
+            ws.cell(VAL_ROW_EQUITY, i + 3,
+                    f"={cur}{VAL_ROW_EV}+{cur}{VAL_ROW_DEBT}+{cur}{VAL_ROW_CASH}"
+                    f"+{cur}{VAL_ROW_NCI}+{cur}{VAL_ROW_EQINV}")
+        )
+        style_link(ws.cell(VAL_ROW_SHARES, i + 3, f"=IS!{cur}{IS_ROW_SHARES}"))
+        style_subtotal(
+            ws.cell(VAL_ROW_PPS, i + 3,
+                    f"=IFERROR({cur}{VAL_ROW_EQUITY}/{cur}{VAL_ROW_SHARES},0)"),
+            num_format=NUM_DEC,
+        )
         year_number = k + 1
         style_formula(
-            ws.cell(12, i + 2, f"=IFERROR(({cur}11/inp_current_price)^(1/{year_number})-1,0)"),
+            ws.cell(VAL_ROW_IRR, i + 3,
+                    f"=IFERROR(({cur}{VAL_ROW_PPS}/inp_current_price)^(1/{year_number})-1,0)"),
             num_format=PCT,
         )
-        style_formula(ws.cell(13, i + 2, f"=IFERROR({cur}11/inp_current_price,0)"), num_format=MULT)
+        style_formula(
+            ws.cell(VAL_ROW_MOIC, i + 3,
+                    f"=IFERROR({cur}{VAL_ROW_PPS}/inp_current_price,0)"),
+            num_format=MULT,
+        )
 
-    ws.freeze_panes = "B2"
+    ws.freeze_panes = "C5"
     _set_widths(ws, n)
 
 
 def build_summary(ws, years):
+    apply_sheet_defaults(ws, "Summary")
     n = len(years)
 
-    ws.cell(1, 1, "Company Name").font = LABEL_BOLD
-    style_link(ws.cell(1, 2, "=inp_company_name"), num_format=TEXT)
-    ws.cell(2, 1, "Ticker").font = LABEL_BOLD
-    style_link(ws.cell(2, 2, "=inp_ticker"), num_format=TEXT)
-    ws.cell(3, 1, "Sector").font = LABEL_BOLD
-    style_link(ws.cell(3, 2, "=inp_sector"), num_format=TEXT)
+    style_label(ws.cell(4, 2, "Company Name"), bold=True)
+    style_link(ws.cell(4, 3, "=inp_company_name"), num_format=TEXT)
+    style_label(ws.cell(5, 2, "Ticker"), bold=True)
+    style_link(ws.cell(5, 3, "=inp_ticker"), num_format=TEXT)
+    style_label(ws.cell(6, 2, "Sector"), bold=True)
+    style_link(ws.cell(6, 3, "=inp_sector"), num_format=TEXT)
 
-    ws.cell(5, 1, "Financial Summary").font = SECTION_FONT
+    style_label(ws.cell(8, 2, "Financial Summary"), bold=True)
     for i, (_yr, lbl) in enumerate(years):
-        style_header(ws.cell(6, i + 2, lbl))
+        style_header(ws.cell(9, i + 3, lbl))
 
-    ws.cell(7, 1, "Revenue")
-    ws.cell(8, 1, "Revenue Growth %")
-    ws.cell(9, 1, "EBITDA")
-    ws.cell(10, 1, "EBITDA Margin %")
-    ws.cell(11, 1, "Levered Free Cash Flow")
-    ws.cell(12, 1, "LFCF Margin %")
-    ws.cell(13, 1, "Net Debt")
-    ws.cell(14, 1, "Net Leverage (Net Debt / EBITDA)")
+    style_label(ws.cell(10, 2, "Revenue"))
+    style_label(ws.cell(11, 2, "Revenue Growth %"))
+    style_label(ws.cell(12, 2, "EBITDA"))
+    style_label(ws.cell(13, 2, "EBITDA Margin %"))
+    style_label(ws.cell(14, 2, "Levered Free Cash Flow"))
+    style_label(ws.cell(15, 2, "LFCF Margin %"))
+    style_label(ws.cell(16, 2, "Net Debt"))
+    style_label(ws.cell(17, 2, "Net Leverage (Net Debt / EBITDA)"))
 
     for i in range(n):
         cur = col(i)
-        style_link(ws.cell(7, i + 2, f"=IS!{cur}2"))
-        style_link(ws.cell(8, i + 2, f"=IS!{cur}3"), num_format=PCT)
-        style_link(ws.cell(9, i + 2, f"=IS!{cur}8"))
-        style_link(ws.cell(10, i + 2, f"=IS!{cur}9"), num_format=PCT)
-        style_link(ws.cell(11, i + 2, f"=CF!{cur}6"))
-        style_formula(ws.cell(12, i + 2, f"=IFERROR({cur}11/{cur}7,0)"), num_format=PCT)
-        style_formula(ws.cell(13, i + 2, f"=Debt!{cur}29-CF!{cur}11"))
-        style_subtotal(ws.cell(14, i + 2, f"=IFERROR({cur}13/{cur}9,0)"), num_format=MULT)
+        style_link(ws.cell(10, i + 3, f"=IS!{cur}{IS_ROW_REV}"))
+        style_link(ws.cell(11, i + 3, f"=IS!{cur}{IS_ROW_GROWTH}"), num_format=PCT)
+        style_link(ws.cell(12, i + 3, f"=IS!{cur}{IS_ROW_EBITDA}"))
+        style_link(ws.cell(13, i + 3, f"=IS!{cur}{IS_ROW_EBITDAM}"), num_format=PCT)
+        style_link(ws.cell(14, i + 3, f"=CF!{cur}{CF_ROW_LFCF}"))
+        style_formula(ws.cell(15, i + 3, f"=IFERROR({cur}14/{cur}10,0)"), num_format=PCT)
+        style_formula(
+            ws.cell(16, i + 3, f"=Debt!{cur}{DEBT_ROW_TOT_END}-CF!{cur}{CF_ROW_ENDCASH}")
+        )
+        style_subtotal(
+            ws.cell(17, i + 3, f"=IFERROR({cur}16/{cur}12,0)"),
+            num_format=MULT,
+        )
 
-    ws.cell(16, 1, "Returns Table").font = SECTION_FONT
+    style_label(ws.cell(19, 2, "Returns Table"), bold=True)
     for j, h in enumerate(["Year", "Implied Price per Share", "Implied IRR", "Implied MOIC"]):
-        style_header(ws.cell(17, j + 1, h))
+        style_header(ws.cell(20, j + 2, h))
 
     proj_indices = [i for i, (_y, lbl) in enumerate(years) if lbl.endswith("E")]
     for k, (yr_off, label) in enumerate([(1, "Y1"), (3, "Y3"), (5, "Y5"), (10, "Y10")]):
-        r = 18 + k
+        r = 21 + k
         i_col = proj_indices[yr_off - 1]
         cur = col(i_col)
-        ws.cell(r, 1, f"{label} ({years[i_col][1]})").font = LABEL_BOLD
-        style_link(ws.cell(r, 2, f"=Valuation!{cur}11"), num_format=NUM_DEC)
-        style_link(ws.cell(r, 3, f"=Valuation!{cur}12"), num_format=PCT)
-        style_link(ws.cell(r, 4, f"=Valuation!{cur}13"), num_format=MULT)
+        style_label(ws.cell(r, 2, f"{label} ({years[i_col][1]})"), bold=True)
+        style_link(ws.cell(r, 3, f"=Valuation!{cur}{VAL_ROW_PPS}"), num_format=NUM_DEC)
+        style_link(ws.cell(r, 4, f"=Valuation!{cur}{VAL_ROW_IRR}"), num_format=PCT)
+        style_link(ws.cell(r, 5, f"=Valuation!{cur}{VAL_ROW_MOIC}"), num_format=MULT)
 
-    ws.freeze_panes = "B2"
+    ws.freeze_panes = "C5"
     _set_widths(ws, n)
 
 
 def build_sensitivity(ws, _years):
-    ws.cell(1, 1, "Exit Multiple Sensitivity").font = TITLE_FONT
-    ws.cell(2, 1, "Target Year Offset (1 = first projection year)")
-    style_input(ws.cell(2, 2, 5), num_format="0")  # named sens_target_year_offset
+    apply_sheet_defaults(ws, "Sensitivity")
 
-    ws.cell(4, 1, "Exit Multiple").font = LABEL_BOLD
-    header_b = ws.cell(4, 2, '="Implied Price per Share at Year " & sens_target_year_offset')
-    header_b.font = LABEL_BOLD
+    style_label(ws.cell(4, 2, "Target Year Offset (1 = first projection year)"))
+    style_input(ws.cell(4, 3, 5), num_format="0")  # named sens_target_year_offset
+
+    style_label(ws.cell(6, 2, "Exit Multiple"), bold=True)
+    header_b = ws.cell(6, 3, '="Implied Price per Share at Year " & sens_target_year_offset')
+    header_b.font = LABEL_BOLD_FONT
 
     multiples = [6, 7, 8, 9, 10, 11, 12, 13, 14]
-    for k, m in enumerate(multiples):
-        r = 5 + k
-        style_input(ws.cell(r, 1, m), num_format=MULT)
-        formula = (
-            f"=(INDEX(IS!$E$8:$N$8,sens_target_year_offset)*$A{r}"
-            f"-INDEX(Debt!$E$29:$N$29,sens_target_year_offset)"
-            f"+INDEX(CF!$E$11:$N$11,sens_target_year_offset)"
-            f"-inp_minority_interest+inp_equity_investments)"
-            f"/INDEX(IS!$E$19:$N$19,sens_target_year_offset)"
-        )
-        style_formula(ws.cell(r, 2, formula), num_format=NUM_DEC)
+    # IS EBITDA row, Debt total ending row, CF ending cash row, IS shares row.
+    # Year columns on those tabs run from F to O (cols 6..15) for the 10 projection years.
+    is_ebitda_range  = f"IS!$F${IS_ROW_EBITDA}:$O${IS_ROW_EBITDA}"
+    debt_end_range   = f"Debt!$F${DEBT_ROW_TOT_END}:$O${DEBT_ROW_TOT_END}"
+    cf_endcash_range = f"CF!$F${CF_ROW_ENDCASH}:$O${CF_ROW_ENDCASH}"
+    is_shares_range  = f"IS!$F${IS_ROW_SHARES}:$O${IS_ROW_SHARES}"
 
-    ws.cell(15, 1, "2D Sensitivity (Exit Multiple x Year)").font = SECTION_FONT
+    for k, m in enumerate(multiples):
+        r = 7 + k
+        style_input(ws.cell(r, 2, m), num_format=MULT)
+        formula = (
+            f"=(INDEX({is_ebitda_range},sens_target_year_offset)*$B{r}"
+            f"-INDEX({debt_end_range},sens_target_year_offset)"
+            f"+INDEX({cf_endcash_range},sens_target_year_offset)"
+            f"-inp_minority_interest+inp_equity_investments)"
+            f"/INDEX({is_shares_range},sens_target_year_offset)"
+        )
+        style_formula(ws.cell(r, 3, formula), num_format=NUM_DEC)
+
+    style_label(ws.cell(17, 2, "2D Sensitivity (Exit Multiple x Year)"), bold=True)
     for j, h in enumerate(["Multiple", "Y3", "Y5", "Y7", "Y10"]):
-        style_header(ws.cell(16, j + 1, h))
+        style_header(ws.cell(18, j + 2, h))
 
     year_offsets = [3, 5, 7, 10]
     for k, m in enumerate(multiples):
-        r = 17 + k
-        style_input(ws.cell(r, 1, m), num_format=MULT)
+        r = 19 + k
+        style_input(ws.cell(r, 2, m), num_format=MULT)
         for j, off in enumerate(year_offsets):
             formula = (
-                f"=(INDEX(IS!$E$8:$N$8,{off})*$A{r}"
-                f"-INDEX(Debt!$E$29:$N$29,{off})"
-                f"+INDEX(CF!$E$11:$N$11,{off})"
+                f"=(INDEX({is_ebitda_range},{off})*$B{r}"
+                f"-INDEX({debt_end_range},{off})"
+                f"+INDEX({cf_endcash_range},{off})"
                 f"-inp_minority_interest+inp_equity_investments)"
-                f"/INDEX(IS!$E$19:$N$19,{off})"
+                f"/INDEX({is_shares_range},{off})"
             )
-            style_formula(ws.cell(r, j + 2, formula), num_format=NUM_DEC)
+            style_formula(ws.cell(r, j + 3, formula), num_format=NUM_DEC)
 
-    ws.column_dimensions["A"].width = 38
-    for letter in ["B", "C", "D", "E"]:
+    ws.column_dimensions["B"].width = 38
+    for letter in ["C", "D", "E", "F"]:
         ws.column_dimensions[letter].width = 20
 
 
@@ -702,87 +973,92 @@ def build_capiq_data(ws):
     the fetcher. shared/fetch_capiq.py writes hardcoded values into the data
     cells; the cells are left empty here.
     """
+    apply_sheet_defaults(ws, "CapIQ Data")
     ws.sheet_state = "hidden"
     ws.sheet_properties.tabColor = "808080"
 
-    ws.cell(capiq_layout.ROW_BANNER, 1,
-            "_CapIQ_Data — DO NOT EDIT MANUALLY. Populated by shared/fetch_capiq.py."
-            ).font = BANNER_FONT
-    ws.cell(capiq_layout.ROW_LAST_FETCH, 1, "Last fetch:").font = LABEL_BOLD
-    ws.cell(capiq_layout.ROW_TICKER, 1, "Ticker:").font = LABEL_BOLD
+    banner = ws.cell(capiq_layout.ROW_BANNER, 2,
+                     "_CapIQ_Data — DO NOT EDIT MANUALLY. Populated by shared/fetch_capiq.py.")
+    banner.font = BANNER_FONT
+
+    style_label(ws.cell(capiq_layout.ROW_RUN_VIA, 2, "Run via:"), bold=True)
+    style_label(ws.cell(capiq_layout.ROW_RUN_VIA, 3, "python -m shared.fetch_capiq <TICKER>"))
+    style_label(ws.cell(capiq_layout.ROW_TICKER, 2, "Ticker:"), bold=True)
+    style_label(ws.cell(capiq_layout.ROW_DATE, 2, "Date"), bold=True)
+    style_label(ws.cell(capiq_layout.ROW_FETCHER_DATE, 2, "Fetcher Run-Date"), bold=True)
 
     for j, h in enumerate(capiq_layout.COL_HEADERS):
-        style_header(ws.cell(capiq_layout.ROW_COL_HEADERS, j + 1, h))
+        style_header(ws.cell(capiq_layout.ROW_COL_HEADERS, j + 2, h))
 
+    # Section A: metadata labels in B; values in F (left blank — fetch script writes them).
     for r, label, _ in capiq_layout.METADATA:
-        ws.cell(r, 1, label)
-    for r, label, _ in capiq_layout.CURRENT:
-        ws.cell(r, 1, label)
-    for r, label, _ in capiq_layout.HISTORICAL:
-        ws.cell(r, 1, label)
+        style_label(ws.cell(r, 2, label))
 
-    ws.column_dimensions["A"].width = 35
-    for letter in ["B", "C", "D", "E"]:
-        ws.column_dimensions[letter].width = 16
+    # Section B: current state. Two rows have formulas (Market Cap, Enterprise Value).
+    for r, label, is_calc in capiq_layout.CURRENT_STATE:
+        if is_calc:
+            style_label(ws.cell(r, 2, label), bold=True)
+        else:
+            style_label(ws.cell(r, 2, label))
+    # Market Cap = F18 * F19
+    style_subtotal(ws.cell(20, 6, "=F18*F19"), num_format=NUM)
+    # Enterprise Value = F20 - F21 - F22 + F23 + F24 + F25 - F26 - F27
+    style_subtotal(
+        ws.cell(28, 6, "=F20-F21-F22+F23+F24+F25-F26-F27"),
+        num_format=NUM,
+    )
+
+    # Section C: historicals — labels only; data in C/D/E populated by fetch.
+    for r, label in capiq_layout.HISTORICALS:
+        style_label(ws.cell(r, 2, label))
+
+    ws.column_dimensions["B"].width = 35
+    for letter in ["C", "D", "E", "F"]:
+        ws.column_dimensions[letter].width = 14
 
 
 def build_broker_data(ws):
     """Mirror of broker_fetcher.xlsx Fetcher tab.
 
-    Rows 10-17 (P&L) and rows 28, 29, 31 (sentiment fetched values) are
-    populated by shared/fetch_broker_estimates.py at runtime. Rows 20-25
-    (implied growth/margins) and B30 (implied upside) are formulas that
-    live in this workbook so they update when historicals refresh.
+    P&L grid (rows 13-20 cols C-H) and sentiment fetched values (B31, B32, B34)
+    are populated by shared/fetch_broker_estimates.py at runtime. Implied
+    growth/margin formulas (rows 23-28) and implied upside (row 33) live in
+    this workbook so they update when historicals refresh.
     """
+    apply_sheet_defaults(ws, "Broker Data")
     ws.sheet_state = "hidden"
     ws.sheet_properties.tabColor = "808080"
 
-    ws.cell(broker_layout.ROW_BANNER, 1,
-            "_Broker_Data — DO NOT EDIT MANUALLY. Populated by shared/fetch_broker_estimates.py."
-            ).font = BANNER_FONT
-    ws.cell(broker_layout.ROW_LAST_FETCH, 1, "Last fetch:").font = LABEL_BOLD
-    ws.cell(broker_layout.ROW_TICKER, 1, "Ticker:").font = LABEL_BOLD
-    ws.cell(broker_layout.ROW_FY1_YEAR, 1, "FY1 fiscal year:").font = LABEL_BOLD
-    ws.cell(broker_layout.ROW_FY2_YEAR, 1, "FY2 fiscal year:").font = LABEL_BOLD
-    ws.cell(broker_layout.ROW_FY3_YEAR, 1, "FY3 fiscal year:").font = LABEL_BOLD
+    banner = ws.cell(broker_layout.ROW_BANNER, 2,
+                     "_Broker_Data — DO NOT EDIT MANUALLY. Populated by shared/fetch_broker_estimates.py.")
+    banner.font = BANNER_FONT
+
+    style_label(ws.cell(broker_layout.ROW_LAST_FETCH, 2, "Last fetch:"), bold=True)
+    style_label(ws.cell(broker_layout.ROW_TICKER, 2, "Ticker:"), bold=True)
+    style_label(ws.cell(broker_layout.ROW_FY1_YEAR, 2, "FY1 fiscal year:"), bold=True)
+    style_label(ws.cell(broker_layout.ROW_FY2_YEAR, 2, "FY2 fiscal year:"), bold=True)
+    style_label(ws.cell(broker_layout.ROW_FY3_YEAR, 2, "FY3 fiscal year:"), bold=True)
 
     for j, h in enumerate(broker_layout.COL_HEADERS):
-        style_header(ws.cell(broker_layout.ROW_COL_HEADERS, j + 1, h))
+        style_header(ws.cell(broker_layout.ROW_COL_HEADERS, j + 2, h))
 
-    # Section A labels (data populated by fetch script)
     for r, label, *_ in broker_layout.PNL:
-        ws.cell(r, 1, label)
+        style_label(ws.cell(r, 2, label))
 
-    # Section B: implied calcs as formulas (live in this workbook)
     for r, label, formula in broker_layout.IMPLIED:
-        ws.cell(r, 1, label)
-        c = ws.cell(r, 2, formula)
+        style_label(ws.cell(r, 2, label))
+        c = ws.cell(r, 3, formula)
         style_formula(c, num_format=PCT)
 
-    # Section C: sentiment labels; B30 is a formula here
     for r, label, _ in broker_layout.SENTIMENT:
-        ws.cell(r, 1, label)
+        style_label(ws.cell(r, 2, label))
     for r, formula in broker_layout.SENTIMENT_FORMULAS_IN_MODEL.items():
-        c = ws.cell(r, 2, formula)
+        c = ws.cell(r, 3, formula)
         style_formula(c, num_format=PCT)
 
-    ws.column_dimensions["A"].width = 38
-    for letter in ["B", "C", "D", "E", "F", "G"]:
+    ws.column_dimensions["B"].width = 38
+    for letter in ["C", "D", "E", "F", "G", "H"]:
         ws.column_dimensions[letter].width = 14
-
-
-def register_driver_named_ranges(wb):
-    """Driver assumption rows on Inputs (E..N for the 10 projection years)."""
-    drv_ranges = {
-        "drv_revenue_growth": DRV_REV,
-        "drv_gross_margin":   DRV_GM,
-        "drv_opex_pct_rev":   DRV_OPEX,
-        "drv_capex_pct_rev":  DRV_CAPEX,
-        "drv_da_pct_capex":   DRV_DA,
-        "drv_exit_multiple":  DRV_EXIT,
-    }
-    for name, row in drv_ranges.items():
-        add_named_range(wb, name, "Inputs", f"$E${row}:$N${row}")
 
 
 def build():
@@ -808,7 +1084,11 @@ def build():
     capiq_ws = wb.create_sheet("_CapIQ_Data")
     broker_ws = wb.create_sheet("_Broker_Data")
 
+    # Inputs first so the named ranges it registers are available to the others.
     build_inputs(inputs_ws, years)
+    register_inputs_named_ranges(wb)
+    register_driver_named_ranges(wb)
+
     build_cover(cover_ws, years)
     build_is(is_ws, years)
     build_cf(cf_ws, years)
@@ -819,9 +1099,7 @@ def build():
     build_capiq_data(capiq_ws)
     build_broker_data(broker_ws)
 
-    register_inputs_named_ranges(wb)
-    register_driver_named_ranges(wb)
-    add_named_range(wb, "sens_target_year_offset", "Sensitivity", "$B$2")
+    add_named_range(wb, "sens_target_year_offset", "Sensitivity", "$C$4")
 
     TEMPLATE_PATH.parent.mkdir(parents=True, exist_ok=True)
     wb.save(TEMPLATE_PATH)

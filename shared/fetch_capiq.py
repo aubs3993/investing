@@ -8,11 +8,11 @@ Workflow:
     1. Open templates/capiq_fetcher.xlsx (visible by default).
     2. Set the `fetcher_ticker` named range to the requested ticker.
     3. Force calculation, then wait for CapIQ async queries to resolve.
-    4. Validate that Fetcher and _CapIQ_Data share the same column-A field
-       labels (both come from shared.capiq_layout, but the user may have
-       hand-edited one without the other).
+    4. Validate that Fetcher and _CapIQ_Data share the same column-B field
+       labels at the rows shared.capiq_layout expects.
     5. Read Fetcher's used range as values; write to _CapIQ_Data verbatim.
-    6. Stamp last-fetch timestamp + ticker on _CapIQ_Data.
+    6. Stamp the per-ticker model copy with the fetcher run timestamp at C8
+       (NEVER write to the master fetcher).
     7. Save company_model.xlsx; close fetcher without saving.
 """
 from __future__ import annotations
@@ -48,39 +48,44 @@ def _expected_field_labels():
 
 
 def _read_field_labels(sheet) -> list[tuple[int, str]]:
-    """Read column A on a sheet at the rows we expect data on (skip blanks)."""
+    """Read column B on a sheet at the rows we expect data on."""
     labels = []
     for r, _ in _expected_field_labels():
-        v = sheet.range((r, 1)).value
+        v = sheet.range((r, capiq_layout.COL_FIELD_LABEL)).value
         labels.append((r, v))
     return labels
 
 
 def _validate_layout_match(fetcher_sheet, capiq_sheet) -> None:
+    """Field-label cross-validation between Fetcher and _CapIQ_Data (case-insensitive)."""
     expected = _expected_field_labels()
     fet_labels = _read_field_labels(fetcher_sheet)
     cap_labels = _read_field_labels(capiq_sheet)
     misaligned = []
     for (r, exp_label), (_, fet_label), (_, cap_label) in zip(expected, fet_labels, cap_labels):
-        if (fet_label or "") != exp_label or (cap_label or "") != exp_label:
+        fet_l = (fet_label or "").strip().lower()
+        cap_l = (cap_label or "").strip().lower()
+        exp_l = exp_label.strip().lower()
+        if fet_l != exp_l or cap_l != exp_l:
             misaligned.append((r, exp_label, fet_label, cap_label))
     if misaligned:
         msg = ["Layout mismatch between Fetcher and _CapIQ_Data."]
         for r, exp, fet, cap in misaligned:
             msg.append(f"  row {r}: expected {exp!r} | Fetcher: {fet!r} | _CapIQ_Data: {cap!r}")
         msg.append(
-            "Fix: edit shared/capiq_layout.py and rerun both scaffolders, OR "
-            "manually align the rows in both workbooks."
+            "Fix: edit shared/capiq_layout.py and rerun shared.scaffold_template, OR "
+            "manually align the rows in capiq_fetcher.xlsx to match."
         )
         raise SystemExit("\n".join(msg))
+    print(f"  Field-label cross-validation: OK ({len(expected)} rows checked)")
 
 
 def _check_capiq_loaded(fetcher_sheet) -> None:
-    """E7 holds IQ_COMPANY_NAME; if CapIQ plugin is missing, it returns #NAME?."""
-    val = fetcher_sheet.range("E7").value
+    """F12 holds IQ_COMPANY_NAME; if CapIQ plugin is missing, it returns #NAME?."""
+    val = fetcher_sheet.range((capiq_layout.METADATA[0][0], capiq_layout.COL_CURRENT)).value
     if isinstance(val, str) and val.strip().startswith("#NAME"):
         raise SystemExit(
-            "CapIQ plugin not loaded (E7 returned #NAME?). Open Excel manually, "
+            "CapIQ plugin not loaded (F12 returned #NAME?). Open Excel manually, "
             "sign in to the S&P Capital IQ plugin, then retry."
         )
 
@@ -111,7 +116,8 @@ def fetch(ticker: str, headless: bool = False, model_path_override: str | None =
         )
     if not FETCHER_PATH.exists():
         raise SystemExit(
-            f"Missing {FETCHER_PATH}. Run `python -m shared.scaffold_capiq_fetcher` first."
+            f"Missing {FETCHER_PATH}. The fetcher is hand-maintained and is the "
+            f"source of truth — restore it from git history if it's missing."
         )
     print(f"Writing CapIQ values to: {model_path}")
 
@@ -138,11 +144,12 @@ def fetch(ticker: str, headless: bool = False, model_path_override: str | None =
         fetcher_wb = app.books.open(str(FETCHER_PATH), update_links=False)
         fetcher_sheet = fetcher_wb.sheets["Fetcher"]
 
-        # Drive the ticker via the named range so layout drift in B3 doesn't break us.
+        # Drive the ticker via the named range so layout drift in the ticker
+        # cell doesn't break us.
         try:
             fetcher_wb.names["fetcher_ticker"].refers_to_range.value = ticker
         except Exception:
-            fetcher_sheet.range((capiq_layout.ROW_TICKER, 2)).value = ticker
+            fetcher_sheet.range((capiq_layout.ROW_TICKER, 3)).value = ticker
 
         # Trigger calc, then wait for async CapIQ queries.
         app.calculate()
@@ -169,16 +176,16 @@ def fetch(ticker: str, headless: bool = False, model_path_override: str | None =
         used = fetcher_sheet.used_range
         last_row = used.last_cell.row
         last_col = used.last_cell.column
-        rng_addr = (1, 1, last_row, last_col)
         values = fetcher_sheet.range((1, 1), (last_row, last_col)).value
 
         capiq_sheet.range((1, 1), (last_row, last_col)).value = values
 
-        # Stamp metadata after copy (otherwise the verbatim copy would clobber).
-        capiq_sheet.range((capiq_layout.ROW_LAST_FETCH, 2)).value = (
-            datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        )
-        capiq_sheet.range((capiq_layout.ROW_TICKER, 2)).value = ticker
+        # Stamp ticker + fetcher run timestamp on the per-ticker model copy
+        # ONLY. The master fetcher xlsx is hand-maintained and untouched.
+        capiq_sheet.range((capiq_layout.ROW_TICKER, 3)).value = ticker
+        run_ts = datetime.now()
+        capiq_sheet.range((capiq_layout.ROW_FETCHER_DATE, 3)).value = run_ts
+        capiq_sheet.range((capiq_layout.ROW_FETCHER_DATE, 3)).number_format = "mm/dd/yyyy hh:mm"
 
         model_wb.save()
         err_count, samples = _count_errors(values)
@@ -187,26 +194,27 @@ def fetch(ticker: str, headless: bool = False, model_path_override: str | None =
         )
 
         print(f"CapIQ fetch complete: {ticker}")
-        print(f"  Last fetch: {datetime.now():%Y-%m-%d %H:%M:%S}")
+        print(f"  Last fetch: {run_ts:%Y-%m-%d %H:%M:%S}")
         print(f"  Cells refreshed: {cells_refreshed}")
         print(f"  Errors: {err_count}" + (f"  e.g. {samples}" if samples else ""))
 
-        # Sanity-check pulls
+        # Sanity-check pulls. New layout: historicals in C/D/E (FY-2/FY-1/FY);
+        # current state in F.
         def _val(addr):
             try:
                 return capiq_sheet.range(addr).value
             except Exception:
                 return None
-        rev_fy1 = _val((25, 4))   # D25
-        ebitda_fy1 = _val((32, 4))  # D32
-        cash = _val((16, 5))      # E16
-        debt = _val((17, 5))      # E17
+        rev_fy   = _val((31, capiq_layout.COL_FY))         # E31
+        ebitda_fy = _val((36, capiq_layout.COL_FY))        # E36
+        cash      = _val((21, capiq_layout.COL_CURRENT))   # F21
+        debt      = _val((23, capiq_layout.COL_CURRENT))   # F23
         print()
         print("  Sample values:")
-        print(f"    Revenue (FY-1):  {_format_money(rev_fy1)}")
-        print(f"    EBITDA (FY-1):   {_format_money(ebitda_fy1)}")
-        print(f"    Cash:            {_format_money(cash)}")
-        print(f"    Total Debt:      {_format_money(debt)}")
+        print(f"    Revenue (IQ_FY):  {_format_money(rev_fy)}")
+        print(f"    EBITDA (IQ_FY):   {_format_money(ebitda_fy)}")
+        print(f"    Cash:             {_format_money(cash)}")
+        print(f"    Total Debt:       {_format_money(debt)}")
 
         if err_count:
             print(

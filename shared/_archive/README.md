@@ -1,0 +1,1 @@
+Scripts in this folder are historical scaffolders that have been retired. They're preserved for reference but should NOT be re-run — the artifacts they generate (e.g., `capiq_fetcher.xlsx`) are now hand-maintained as the source of truth, and re-running these scripts would overwrite manual edits.

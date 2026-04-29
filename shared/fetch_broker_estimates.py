@@ -51,7 +51,7 @@ def _expected_field_labels():
 def _read_field_labels(sheet) -> list[tuple[int, str]]:
     out = []
     for r, _ in _expected_field_labels():
-        out.append((r, sheet.range((r, 1)).value))
+        out.append((r, sheet.range((r, 2)).value))  # column B = field label
     return out
 
 
@@ -75,12 +75,13 @@ def _validate_layout_match(fetcher_sheet, broker_sheet) -> None:
 
 
 def _check_capiq_loaded(fetcher_sheet) -> None:
-    """B10 = IQ_EST_REV(...). #NAME? indicates CapIQ plugin missing."""
-    val = fetcher_sheet.range((10, 2)).value
+    """C{first PNL row} = IQ_EST_REV(...). #NAME? indicates CapIQ plugin missing."""
+    first_pnl_row = broker_layout.PNL[0][0]
+    val = fetcher_sheet.range((first_pnl_row, 3)).value
     if isinstance(val, str) and val.strip().startswith("#NAME"):
         raise SystemExit(
-            "CapIQ plugin not loaded (B10 returned #NAME?). Open Excel manually, "
-            "sign in to S&P Capital IQ, then retry."
+            f"CapIQ plugin not loaded (C{first_pnl_row} returned #NAME?). Open Excel "
+            f"manually, sign in to S&P Capital IQ, then retry."
         )
 
 
@@ -91,8 +92,9 @@ def _format_money(v):
 
 
 # Cells the fetcher provides values for (everything except formula rows).
+# New layout: column A is a spacer, so PNL data lives in cols C–H.
 PNL_ROWS = [r for r, *_ in broker_layout.PNL]
-PNL_COLS = (2, 7)  # B..G inclusive
+PNL_COLS = (3, 8)  # C..H inclusive
 FY_LABEL_ROWS = [broker_layout.ROW_FY1_YEAR, broker_layout.ROW_FY2_YEAR, broker_layout.ROW_FY3_YEAR]
 SENTIMENT_FETCH_ROWS = [r for r, _, fmt in broker_layout.SENTIMENT if fmt is not None]
 
@@ -133,7 +135,7 @@ def fetch(ticker: str, headless: bool = False, model_path_override: str | None =
         try:
             fetcher_wb.names["broker_fetcher_ticker"].refers_to_range.value = ticker
         except Exception:
-            fetcher_sheet.range((broker_layout.ROW_TICKER, 2)).value = ticker
+            fetcher_sheet.range((broker_layout.ROW_TICKER, 3)).value = ticker
 
         app.calculate()
         try:
@@ -154,17 +156,17 @@ def fetch(ticker: str, headless: bool = False, model_path_override: str | None =
 
         _validate_layout_match(fetcher_sheet, broker_sheet)
 
-        # Stamp metadata first (timestamp + ticker)
-        broker_sheet.range((broker_layout.ROW_LAST_FETCH, 2)).value = (
+        # Stamp metadata first (timestamp + ticker) — values in column C.
+        broker_sheet.range((broker_layout.ROW_LAST_FETCH, 3)).value = (
             datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         )
-        broker_sheet.range((broker_layout.ROW_TICKER, 2)).value = ticker
+        broker_sheet.range((broker_layout.ROW_TICKER, 3)).value = ticker
 
-        # FY year labels (rows 4-6, col B)
+        # FY year labels (col C in new layout)
         fy_values = []
         for r in FY_LABEL_ROWS:
-            v = fetcher_sheet.range((r, 2)).value
-            broker_sheet.range((r, 2)).value = v
+            v = fetcher_sheet.range((r, 3)).value
+            broker_sheet.range((r, 3)).value = v
             fy_values.append(v)
 
         # P&L grid (rows 10-17, cols B-G)
@@ -182,10 +184,11 @@ def fetch(ticker: str, headless: bool = False, model_path_override: str | None =
                     if len(err_samples) < 5:
                         err_samples.append(v)
 
-        # Sentiment fetched rows (B28, B29, B31). Skip B30/B32 — those are formulas.
+        # Sentiment fetched rows (column C in new layout). Skip implied-upside
+        # and recommendation-distribution rows — those are formulas / blank.
         for r in SENTIMENT_FETCH_ROWS:
-            v = fetcher_sheet.range((r, 2)).value
-            broker_sheet.range((r, 2)).value = v
+            v = fetcher_sheet.range((r, 3)).value
+            broker_sheet.range((r, 3)).value = v
             if v not in (None, ""):
                 cells_written += 1
             if isinstance(v, str) and v.startswith("#"):
@@ -201,10 +204,12 @@ def fetch(ticker: str, headless: bool = False, model_path_override: str | None =
         print(f"  Cells written: {cells_written}")
         print(f"  Errors: {errors}" + (f"  e.g. {err_samples}" if err_samples else ""))
 
-        rev_fy1 = broker_sheet.range((10, 2)).value   # B10
-        ebitda_fy1 = broker_sheet.range((12, 2)).value  # B12
-        n_analysts = broker_sheet.range((28, 2)).value  # B28
-        avg_target = broker_sheet.range((29, 2)).value  # B29
+        # Sample value reads (new layout positions): Revenue FY1 mean = C13,
+        # EBITDA FY1 mean = C15, # analysts = C31, avg price target = C32.
+        rev_fy1    = broker_sheet.range((13, 3)).value
+        ebitda_fy1 = broker_sheet.range((15, 3)).value
+        n_analysts = broker_sheet.range((31, 3)).value
+        avg_target = broker_sheet.range((32, 3)).value
         print()
         print("  Sample values:")
         print(f"    Revenue FY1 (mean):   {_format_money(rev_fy1)}")

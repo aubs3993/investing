@@ -65,109 +65,95 @@ def extract(ticker: str) -> dict:
         raise SystemExit("Model is missing _CapIQ_Data tab. Regenerate via scaffold_template.")
     cap = wb["_CapIQ_Data"]
 
-    # Historical rows on _CapIQ_Data: B/C/D = FY-3, FY-2, FY-1
+    # Historical rows on _CapIQ_Data: cols C/D/E = FY-2, FY-1, FY (most recent
+    # completed year). Two-period span (FY-2 -> FY) yields a 2-year CAGR.
     def hist(row):
-        return [_get(cap, row, 2), _get(cap, row, 3), _get(cap, row, 4)]
+        return [_get(cap, row, 3), _get(cap, row, 4), _get(cap, row, 5)]
 
-    revenue = hist(25)
-    cogs = hist(26)
-    gp = hist(27)
-    sga = hist(28)
-    rd = hist(29)
-    opex = hist(30)
-    da = hist(31)
-    ebitda = hist(32)
-    ebit = hist(33)
-    int_exp = hist(34)
-    int_inc = hist(35)
-    pretax = hist(36)
-    taxes = hist(37)
-    ni = hist(38)
-    diluted_shares = hist(39)
-    capex = hist(40)
+    revenue = hist(31)
+    cogs = hist(32)
+    gp = hist(33)
+    opex = hist(34)
+    da = hist(35)
+    ebitda = hist(36)
+    ebit = hist(37)
+    capex = hist(38)
+    sbc = hist(39)
+    dps = hist(40)
 
     def block(values):
         return {
-            "FY-3": values[0],
-            "FY-2": values[1],
-            "FY-1": values[2],
-            "cagr_3y": _cagr(values[0], values[2], 2),  # FY-3 to FY-1 = 2 periods
+            "FY-2": values[0],
+            "FY-1": values[1],
+            "FY":   values[2],
+            "cagr_2y":   _cagr(values[0], values[2], 2),
             "yoy_latest": _yoy(values[1], values[2]),
         }
 
     historicals = {
-        "revenue": block(revenue),
-        "cogs": block(cogs),
+        "revenue":      block(revenue),
+        "cogs":         block(cogs),
         "gross_profit": block(gp),
-        "sga": block(sga),
-        "rd_expense": block(rd),
-        "total_opex": block(opex),
-        "d_and_a": block(da),
-        "ebitda": block(ebitda),
-        "ebit": block(ebit),
-        "interest_expense": block(int_exp),
-        "interest_income": block(int_inc),
-        "pretax_income": block(pretax),
-        "taxes": block(taxes),
-        "net_income": block(ni),
-        "diluted_weighted_avg_shares": block(diluted_shares),
-        "capex": block(capex),
+        "total_opex":   block(opex),
+        "d_and_a":      block(da),
+        "ebitda":       block(ebitda),
+        "ebit":         block(ebit),
+        "capex":        block(capex),
+        "sbc":          block(sbc),
+        "dps":          block(dps),
     }
 
     def ratio_block(num, den):
         vals = [_safe_div(n, d) for n, d in zip(num, den)]
         return {
-            "FY-3": vals[0], "FY-2": vals[1], "FY-1": vals[2],
+            "FY-2": vals[0], "FY-1": vals[1], "FY": vals[2],
             "avg_3y": _avg(vals),
         }
 
     ratios = {
-        "gross_margin":     ratio_block(gp, revenue),
-        "ebitda_margin":    ratio_block(ebitda, revenue),
-        "ebit_margin":      ratio_block(ebit, revenue),
-        "opex_pct_rev":     ratio_block(opex, revenue),
-        "capex_pct_rev":    ratio_block(capex, revenue),
-        "da_pct_capex":     ratio_block(da, capex),
-        "effective_tax":    ratio_block(taxes, pretax),
+        "gross_margin":   ratio_block(gp, revenue),
+        "ebitda_margin": ratio_block(ebitda, revenue),
+        "ebit_margin":   ratio_block(ebit, revenue),
+        "opex_pct_rev":  ratio_block(opex, revenue),
+        "capex_pct_rev": ratio_block(capex, revenue),
+        "da_pct_capex":  ratio_block(da, capex),
+        "sbc_pct_rev":   ratio_block(sbc, revenue),
     }
 
+    # Current state — Section A (rows 12-15) and Section B (rows 18-28) values
+    # all live in column F. Effective tax rate is no longer fetched.
     current_state = {
-        "company_name":          _get(cap, 7, 5),
-        "sector":                _get(cap, 8, 5),
-        "currency":              _get(cap, 9, 5),
-        "filing_status":         _get(cap, 10, 5),
-        "price":                 _get(cap, 13, 5),
-        "diluted_shares_mm":     _get(cap, 14, 5),
-        "quarterly_dps":         _get(cap, 15, 5),
-        "cash_mm":               _get(cap, 16, 5),
-        "debt_mm":               _get(cap, 17, 5),
-        "minority_interest":     _get(cap, 18, 5),
-        "equity_investments":    _get(cap, 19, 5),
-        "effective_tax_rate":    _get(cap, 20, 5),
-        "market_cap_mm":         _get(cap, 21, 5),
-        "net_debt_mm":           _get(cap, 22, 5),
+        "company_name":          _get(cap, 12, 6),
+        "sector":                _get(cap, 13, 6),
+        "currency":              _get(cap, 14, 6),
+        "filing_status":         _get(cap, 15, 6),
+        "price":                 _get(cap, 18, 6),
+        "diluted_shares_mm":     _get(cap, 19, 6),
+        "market_cap_mm":         _get(cap, 20, 6),
+        "cash_mm":               _get(cap, 21, 6),
+        "st_investments_mm":     _get(cap, 22, 6),
+        "debt_mm":               _get(cap, 23, 6),
+        "preferred_equity_mm":   _get(cap, 24, 6),
+        "minority_interest_mm":  _get(cap, 25, 6),
+        "equity_investments_mm": _get(cap, 26, 6),
+        "marketable_securities_mm": _get(cap, 27, 6),
+        "enterprise_value_mm":   _get(cap, 28, 6),
     }
-    price = current_state["price"]
-    qdps = current_state["quarterly_dps"]
-    if isinstance(qdps, (int, float)):
-        current_state["annual_dps"] = qdps * 4
-    if isinstance(price, (int, float)) and isinstance(current_state["diluted_shares_mm"], (int, float)):
-        current_state.setdefault("market_cap_mm", price * current_state["diluted_shares_mm"])
     debt = current_state.get("debt_mm")
     cash = current_state.get("cash_mm")
     if isinstance(debt, (int, float)) and isinstance(cash, (int, float)):
-        current_state["enterprise_value_mm"] = (
-            (current_state.get("market_cap_mm") or 0) + debt - cash
-            + (current_state.get("minority_interest") or 0)
-            - (current_state.get("equity_investments") or 0)
-        )
+        current_state["net_debt_mm"] = debt - cash
+    # Annual DPS = most recent (FY) DPS, fall back to FY-1 if FY is blank.
+    annual_dps = dps[2] if isinstance(dps[2], (int, float)) else dps[1]
+    if isinstance(annual_dps, (int, float)):
+        current_state["annual_dps"] = annual_dps
 
     return {
         "ticker": ticker,
         "company_name": current_state.get("company_name"),
         "sector": current_state.get("sector"),
         "currency": current_state.get("currency"),
-        "fetch_timestamp": _get(cap, 2, 2),
+        "fetch_timestamp": _get(cap, 8, 3),  # _CapIQ_Data!C8 = fetcher run-date
         "historicals": historicals,
         "ratios": ratios,
         "current_state": current_state,
@@ -193,23 +179,23 @@ def to_markdown(data: dict) -> str:
     lines.append("")
     lines.append("## Historicals")
     lines.append("")
-    lines.append("| Metric | FY-3 | FY-2 | FY-1 | 3Y CAGR | YoY latest |")
+    lines.append("| Metric | FY-2 | FY-1 | FY | 2Y CAGR | YoY latest |")
     lines.append("|---|---:|---:|---:|---:|---:|")
     for label, key in [
         ("Revenue", "revenue"), ("Gross Profit", "gross_profit"),
         ("Total OpEx", "total_opex"), ("EBITDA", "ebitda"),
         ("EBIT", "ebit"), ("D&A", "d_and_a"),
-        ("Net Income", "net_income"), ("CapEx", "capex"),
+        ("CapEx", "capex"), ("SBC", "sbc"), ("DPS", "dps"),
     ]:
         b = h[key]
         lines.append(
-            f"| {label} | {_fmt_num(b['FY-3'])} | {_fmt_num(b['FY-2'])} | {_fmt_num(b['FY-1'])} | "
-            f"{_fmt_pct(b['cagr_3y'])} | {_fmt_pct(b['yoy_latest'])} |"
+            f"| {label} | {_fmt_num(b['FY-2'])} | {_fmt_num(b['FY-1'])} | {_fmt_num(b['FY'])} | "
+            f"{_fmt_pct(b['cagr_2y'])} | {_fmt_pct(b['yoy_latest'])} |"
         )
     lines.append("")
     lines.append("## Ratios")
     lines.append("")
-    lines.append("| Ratio | FY-3 | FY-2 | FY-1 | 3Y avg |")
+    lines.append("| Ratio | FY-2 | FY-1 | FY | 3Y avg |")
     lines.append("|---|---:|---:|---:|---:|")
     for label, key in [
         ("Gross Margin", "gross_margin"),
@@ -218,11 +204,11 @@ def to_markdown(data: dict) -> str:
         ("OpEx % of Revenue", "opex_pct_rev"),
         ("CapEx % of Revenue", "capex_pct_rev"),
         ("D&A % of CapEx", "da_pct_capex"),
-        ("Effective Tax Rate", "effective_tax"),
+        ("SBC % of Revenue", "sbc_pct_rev"),
     ]:
         b = r[key]
         lines.append(
-            f"| {label} | {_fmt_pct(b['FY-3'])} | {_fmt_pct(b['FY-2'])} | {_fmt_pct(b['FY-1'])} | "
+            f"| {label} | {_fmt_pct(b['FY-2'])} | {_fmt_pct(b['FY-1'])} | {_fmt_pct(b['FY'])} | "
             f"{_fmt_pct(b['avg_3y'])} |"
         )
     lines.append("")
@@ -235,7 +221,6 @@ def to_markdown(data: dict) -> str:
     lines.append(f"- Debt (M): {_fmt_num(cs.get('debt_mm'))}")
     lines.append(f"- Net debt (M): {_fmt_num(cs.get('net_debt_mm'))}")
     lines.append(f"- Enterprise value (M): {_fmt_num(cs.get('enterprise_value_mm'))}")
-    lines.append(f"- Quarterly DPS: {_fmt_money(cs.get('quarterly_dps'))}")
     lines.append(f"- Annual DPS: {_fmt_money(cs.get('annual_dps'))}")
     return "\n".join(lines)
 
