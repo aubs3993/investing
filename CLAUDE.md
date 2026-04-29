@@ -130,3 +130,17 @@ This separation prevents historical knowledge from getting buried under successi
 
 ### Broker estimates as framing, not anchor
 Broker estimates from `_Broker_Data` are a data point, not a target. The driver research playbook requires explicit articulation of variant view (above/below/in-line vs. consensus) for every driver. If variant view can't be articulated with specificity, default to consensus.
+
+### Multiple history analysis
+
+Pulls daily NTM EV/EBITDA history for a ticker over a configurable lookback. Data flow:
+
+1. `templates/multiple_history_fetcher.xlsx` — live CapIQ workbook with one row per business day (up to 1,500 row capacity). Columns: stock price, share count, balance sheet items (point-in-time), NTM EBITDA, computed Market Cap / EV / Multiple.
+2. `companies/output/<TICKER>/multiple_history_<TICKER>.xlsx` — hardcoded values copy. Generated per ticker. Standalone (works without CapIQ).
+3. `companies/output/<TICKER>/multiple_history_<TICKER>.png` — dual-axis chart (stock price + NTM multiple).
+
+Run via: `python -m companies.scripts.fetch_multiple_history <TICKER> [--end-date YYYY-MM-DD] [--lookback-years N]`
+
+Defaults: end date = today, lookback = 5 years. Outlier filter for the chart drops multiples ≤ 0 or > 100x. No EBITDA smoothing — the time-weighted NTM construction handles fiscal-year transitions cleanly; visible step-changes in the series reflect actual estimate revisions, which are signal not noise.
+
+EV uses point-in-time balance sheet values (`IQ_LP` returns most recent filed period as of the formula's date arg), so cash/debt update only on filing dates while market cap updates daily.
