@@ -1,4 +1,4 @@
-"""Pull daily NTM EV/EBITDA multiple history for a ticker.
+"""Pull daily NTM and 2Y-forward EV/EBITDA multiple + growth history.
 
 Usage:
     python -m companies.scripts.fetch_multiple_history <TICKER>
@@ -14,8 +14,10 @@ Workflow:
     3. Force calc, wait for CapIQ async resolution, sleep 5s buffer.
     4. Read populated rows back as values; write a hardcoded copy to
        companies/output/<TICKER>/multiple_history_<TICKER>.xlsx.
-    5. Build a dual-axis matplotlib chart (stock price + NTM multiple)
-       unless --no-chart.
+    5. Build three dual-axis matplotlib charts unless --no-chart:
+         - multiple_history_<TICKER>.png : Stock Price + NTM EV/EBITDA
+         - multiple_growth_<TICKER>.png  : NTM EV/EBITDA + NTM Growth %
+         - multiple_2y_<TICKER>.png      : 2Y Fwd EV/EBITDA + 2Y Fwd Growth (CAGR)
 """
 from __future__ import annotations
 
@@ -114,7 +116,7 @@ def _count_errors(values_2d) -> tuple[int, list[str]]:
 
 
 def _last_data_col_idx() -> int:
-    """Index of column O (last data column)."""
+    """Index of the last data column (currently X = 24)."""
     return column_index_from_string(layout.DATA_COLUMNS[-1][0])
 
 
@@ -202,7 +204,13 @@ def _build_hardcoded_copy(out_path: Path, ticker: str, end_date: date_cls,
     wb.save(out_path)
 
 
-def _generate_chart(out_xlsx: Path, chart_path: Path, ticker: str) -> tuple[int, float]:
+COLOR_PRICE = "#1f4e78"
+COLOR_MULT = "#c00000"
+COLOR_GROWTH = "#2e7d32"
+MIN_CHART_ROWS = 50
+
+
+def _import_chart_libs():
     try:
         import pandas as pd
         import matplotlib
@@ -214,53 +222,176 @@ def _generate_chart(out_xlsx: Path, chart_path: Path, ticker: str) -> tuple[int,
             "matplotlib + pandas required for charting. "
             "Install via `pip install -r requirements.txt`, or pass --no-chart."
         )
+    return pd, plt, mdates
 
-    # Header row in the xlsx is row 10 (1-indexed) = pandas header=9.
+
+def _read_chart_df(out_xlsx: Path):
+    """Header row 10 (1-indexed) = pandas header=9."""
+    pd, _, _ = _import_chart_libs()
     df = pd.read_excel(out_xlsx, sheet_name="Fetcher", header=9)
     df = df.rename(columns=lambda c: str(c).strip())
-    df = df[["Date", "Stock Price", "NTM EV/EBITDA Multiple"]].copy()
-    df = df.dropna(subset=["Date", "NTM EV/EBITDA Multiple"])
-    df = df[(df["NTM EV/EBITDA Multiple"] > 0) & (df["NTM EV/EBITDA Multiple"] <= 100)]
-    df = df.sort_values("Date").reset_index(drop=True)
-    if df.empty:
-        raise SystemExit("No usable rows for chart after outlier filter.")
+    df = df.dropna(subset=["Date"])
+    return df.sort_values("Date").reset_index(drop=True)
+
+
+def _filter_multiple(df, mult_col):
+    """Keep rows with multiples strictly between 0x and 100x."""
+    s = df[mult_col]
+    return df[(s > 0) & (s < 100)].copy()
+
+
+def _filter_growth(df, growth_col, low=-1.0, high=5.0):
+    s = df[growth_col]
+    return df[(s >= low) & (s <= high)].copy()
+
+
+def _format_y_axis(ax, color, label):
+    ax.set_ylabel(label, color=color)
+    ax.tick_params(axis="y", labelcolor=color)
+
+
+def _format_x_dates(ax, mdates):
+    ax.xaxis.set_major_locator(mdates.YearLocator())
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
+
+
+def _combine_legends(ax1, ax2):
+    l1, lab1 = ax1.get_legend_handles_labels()
+    l2, lab2 = ax2.get_legend_handles_labels()
+    ax1.legend(l1 + l2, lab1 + lab2, loc="upper left", fontsize=9)
+
+
+def _chart_price_and_ntm_multiple(df, ticker, out_path):
+    pd, plt, mdates = _import_chart_libs()
+    sub = _filter_multiple(df, "NTM EV/EBITDA").dropna(subset=["Stock Price"])
+    if len(sub) < MIN_CHART_ROWS:
+        return {"skipped": True, "rows": len(sub), "reason": "insufficient rows"}
 
     plt.rcParams.update({"font.family": "Arial", "font.size": 10})
     fig, ax1 = plt.subplots(figsize=(12, 6))
 
-    color_price = "#1f4e78"
-    ax1.plot(df["Date"], df["Stock Price"], color=color_price, linewidth=1.2, label="Stock Price")
+    ax1.plot(sub["Date"], sub["Stock Price"], color=COLOR_PRICE, linewidth=1.2, label="Stock Price")
     ax1.set_xlabel("Date")
-    ax1.set_ylabel("Stock Price ($)", color=color_price)
-    ax1.tick_params(axis="y", labelcolor=color_price)
+    _format_y_axis(ax1, COLOR_PRICE, "Stock Price ($)")
     ax1.grid(True, alpha=0.3)
 
     ax2 = ax1.twinx()
-    color_mult = "#c00000"
-    ax2.plot(df["Date"], df["NTM EV/EBITDA Multiple"], color=color_mult,
-             linewidth=1.2, label="NTM EV/EBITDA")
-    ax2.set_ylabel("NTM EV/EBITDA Multiple", color=color_mult)
-    ax2.tick_params(axis="y", labelcolor=color_mult)
-
-    median_mult = df["NTM EV/EBITDA Multiple"].median()
-    ax2.axhline(median_mult, color=color_mult, linestyle="--", alpha=0.4,
+    ax2.plot(sub["Date"], sub["NTM EV/EBITDA"], color=COLOR_MULT, linewidth=1.2,
+             label="NTM EV/EBITDA")
+    median_mult = float(sub["NTM EV/EBITDA"].median())
+    ax2.axhline(median_mult, color=COLOR_MULT, linestyle="--", alpha=0.4,
                 linewidth=0.8, label=f"Median: {median_mult:.1f}x")
+    _format_y_axis(ax2, COLOR_MULT, "NTM EV/EBITDA Multiple")
 
     plt.title(f"{ticker} — Stock Price and NTM EV/EBITDA Multiple",
               fontsize=12, fontweight="bold")
-    ax1.xaxis.set_major_locator(mdates.YearLocator())
-    ax1.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
+    _format_x_dates(ax1, mdates)
     fig.autofmt_xdate()
-
-    lines1, labels1 = ax1.get_legend_handles_labels()
-    lines2, labels2 = ax2.get_legend_handles_labels()
-    ax1.legend(lines1 + lines2, labels1 + labels2, loc="upper left", fontsize=9)
+    _combine_legends(ax1, ax2)
 
     plt.tight_layout()
-    plt.savefig(chart_path, dpi=150, bbox_inches="tight")
+    plt.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close()
+    return {"skipped": False, "rows": len(sub), "median_multiple": median_mult}
 
-    return len(df), float(median_mult)
+
+def _chart_ntm_multiple_and_growth(df, ticker, out_path):
+    pd, plt, mdates = _import_chart_libs()
+    sub = _filter_multiple(df, "NTM EV/EBITDA")
+    sub = _filter_growth(sub, "NTM Growth %")
+    if len(sub) < MIN_CHART_ROWS:
+        return {"skipped": True, "rows": len(sub), "reason": "insufficient rows"}
+
+    plt.rcParams.update({"font.family": "Arial", "font.size": 10})
+    fig, ax1 = plt.subplots(figsize=(12, 6))
+
+    ax1.plot(sub["Date"], sub["NTM EV/EBITDA"], color=COLOR_MULT, linewidth=1.2,
+             label="NTM EV/EBITDA")
+    median_mult = float(sub["NTM EV/EBITDA"].median())
+    ax1.axhline(median_mult, color=COLOR_MULT, linestyle="--", alpha=0.4,
+                linewidth=0.8, label=f"Median multiple: {median_mult:.1f}x")
+    _format_y_axis(ax1, COLOR_MULT, "NTM EV/EBITDA Multiple")
+    ax1.grid(True, alpha=0.3)
+
+    ax2 = ax1.twinx()
+    ax2.plot(sub["Date"], sub["NTM Growth %"], color=COLOR_GROWTH, linewidth=1.2,
+             label="NTM Growth %")
+    median_growth = float(sub["NTM Growth %"].median())
+    ax2.axhline(median_growth, color=COLOR_GROWTH, linestyle="--", alpha=0.4,
+                linewidth=0.8, label=f"Median growth: {median_growth:.1%}")
+    ax2.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"{x:.0%}"))
+    _format_y_axis(ax2, COLOR_GROWTH, "NTM EBITDA Growth %")
+
+    plt.title(f"{ticker} — NTM Multiple vs. NTM Growth Expectations",
+              fontsize=12, fontweight="bold")
+    _format_x_dates(ax1, mdates)
+    fig.autofmt_xdate()
+    _combine_legends(ax1, ax2)
+
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close()
+    return {"skipped": False, "rows": len(sub),
+            "median_multiple": median_mult, "median_growth": median_growth}
+
+
+def _chart_2y_forward(df, ticker, out_path):
+    pd, plt, mdates = _import_chart_libs()
+    sub = _filter_multiple(df, "2Y Fwd EV/EBITDA")
+    sub = _filter_growth(sub, "2Y Fwd Growth % (CAGR)")
+    if len(sub) < MIN_CHART_ROWS:
+        return {"skipped": True, "rows": len(sub),
+                "reason": "insufficient rows (likely sparse IQ_CY+3 broker coverage)"}
+
+    plt.rcParams.update({"font.family": "Arial", "font.size": 10})
+    fig, ax1 = plt.subplots(figsize=(12, 6))
+
+    ax1.plot(sub["Date"], sub["2Y Fwd EV/EBITDA"], color=COLOR_MULT, linewidth=1.2,
+             label="2Y Fwd EV/EBITDA")
+    median_mult = float(sub["2Y Fwd EV/EBITDA"].median())
+    ax1.axhline(median_mult, color=COLOR_MULT, linestyle="--", alpha=0.4,
+                linewidth=0.8, label=f"Median multiple: {median_mult:.1f}x")
+    _format_y_axis(ax1, COLOR_MULT, "2Y Forward EV/EBITDA Multiple")
+    ax1.grid(True, alpha=0.3)
+
+    ax2 = ax1.twinx()
+    ax2.plot(sub["Date"], sub["2Y Fwd Growth % (CAGR)"], color=COLOR_GROWTH,
+             linewidth=1.2, label="2Y Fwd Growth % (CAGR)")
+    median_growth = float(sub["2Y Fwd Growth % (CAGR)"].median())
+    ax2.axhline(median_growth, color=COLOR_GROWTH, linestyle="--", alpha=0.4,
+                linewidth=0.8, label=f"Median growth: {median_growth:.1%}")
+    ax2.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"{x:.0%}"))
+    _format_y_axis(ax2, COLOR_GROWTH, "2Y Forward EBITDA Growth % (annualized)")
+
+    plt.title(f"{ticker} — 2Y Forward Multiple vs. 2Y Forward Growth (CAGR)",
+              fontsize=12, fontweight="bold")
+    _format_x_dates(ax1, mdates)
+    fig.autofmt_xdate()
+    _combine_legends(ax1, ax2)
+
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close()
+    return {"skipped": False, "rows": len(sub),
+            "median_multiple": median_mult, "median_growth": median_growth}
+
+
+def _generate_charts(out_xlsx: Path, out_dir: Path, ticker: str) -> dict:
+    """Build all three charts. Returns a dict keyed 'price_ntm', 'ntm_growth', '2y_fwd'."""
+    df = _read_chart_df(out_xlsx)
+    paths = {
+        "price_ntm": out_dir / f"multiple_history_{ticker}.png",
+        "ntm_growth": out_dir / f"multiple_growth_{ticker}.png",
+        "2y_fwd": out_dir / f"multiple_2y_{ticker}.png",
+    }
+    results = {
+        "price_ntm": _chart_price_and_ntm_multiple(df, ticker, paths["price_ntm"]),
+        "ntm_growth": _chart_ntm_multiple_and_growth(df, ticker, paths["ntm_growth"]),
+        "2y_fwd": _chart_2y_forward(df, ticker, paths["2y_fwd"]),
+    }
+    for key, info in results.items():
+        info["path"] = paths[key]
+    return results
 
 
 def fetch(ticker: str, end_date: date_cls, lookback_years: int,
@@ -283,7 +414,6 @@ def fetch(ticker: str, end_date: date_cls, lookback_years: int,
 
     out_dir = REPO_ROOT / "companies" / "output" / ticker
     out_xlsx = out_dir / f"multiple_history_{ticker}.xlsx"
-    chart_path = out_dir / f"multiple_history_{ticker}.png"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"Multiple history fetch: {ticker}")
@@ -346,7 +476,7 @@ def fetch(ticker: str, end_date: date_cls, lookback_years: int,
 
         _check_capiq_loaded(fetcher_sheet)
 
-        # Read back populated range B..O for len(dates) rows.
+        # Read back populated range B..X for len(dates) rows.
         last_row = layout.ROW_DATA_START + len(dates) - 1
         values = fetcher_sheet.range(
             (layout.ROW_DATA_START, 2),
@@ -390,29 +520,51 @@ def fetch(ticker: str, end_date: date_cls, lookback_years: int,
             except Exception:
                 pass
 
-    if not no_chart:
-        rows_used, median_mult = _generate_chart(out_xlsx, chart_path, ticker)
-        outliers_dropped = len(dates) - rows_used
-        print()
-        print(f"Multiple history complete: {ticker}")
-        print(f"  Date range: {dates[-1]} to {dates[0]}")
-        print(f"  Business days fetched: {len(dates)}")
-        print(f"  Outliers / blanks filtered for chart: {outliers_dropped}")
-        print(f"  Median NTM EV/EBITDA: {median_mult:.1f}x")
+    print()
+    print(f"Multiple history complete: {ticker}")
+    print(f"  Date range: {dates[-1]} to {dates[0]}")
+    print(f"  Business days fetched: {len(dates)}")
+
+    if no_chart:
         print()
         print("Files written:")
         print(f"  {out_xlsx}")
-        print(f"  {chart_path}")
+        return
+
+    chart_results = _generate_charts(out_xlsx, out_dir, ticker)
+    print()
+    c1 = chart_results["price_ntm"]
+    c2 = chart_results["ntm_growth"]
+    c3 = chart_results["2y_fwd"]
+
+    if not c1["skipped"]:
+        print(f"  Median NTM EV/EBITDA: {c1['median_multiple']:.1f}x  (rows: {c1['rows']})")
     else:
-        print()
-        print(f"Multiple history complete: {ticker}  (chart skipped)")
-        print(f"  Business days fetched: {len(dates)}")
-        print(f"  File written: {out_xlsx}")
+        print(f"  Chart 1 skipped — {c1.get('reason', 'no data')} ({c1['rows']} rows).")
+
+    if not c2["skipped"]:
+        print(f"  Median NTM Growth: {c2['median_growth']:.1%}       (rows: {c2['rows']})")
+    else:
+        print(f"  Chart 2 skipped — {c2.get('reason', 'no data')} ({c2['rows']} rows).")
+
+    if not c3["skipped"]:
+        print(f"  Median 2Y Fwd EV/EBITDA: {c3['median_multiple']:.1f}x (rows: {c3['rows']})")
+        print(f"  Median 2Y Fwd Growth (CAGR): {c3['median_growth']:.1%} (rows: {c3['rows']})")
+    else:
+        print(f"  Chart 3 skipped — {c3.get('reason', 'no data')} ({c3['rows']} rows).")
+
+    print()
+    print("Files written:")
+    print(f"  {out_xlsx}")
+    for key in ("price_ntm", "ntm_growth", "2y_fwd"):
+        info = chart_results[key]
+        if not info["skipped"]:
+            print(f"  {info['path']}")
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(
-        description="Pull daily NTM EV/EBITDA history for a ticker.",
+        description="Pull daily NTM and 2Y-forward EV/EBITDA + growth history.",
     )
     parser.add_argument("ticker", help="Ticker (e.g. AAPL, BRK.B, 700:HK)")
     parser.add_argument("--end-date", default=None,

@@ -133,14 +133,23 @@ Broker estimates from `_Broker_Data` are a data point, not a target. The driver 
 
 ### Multiple history analysis
 
-Pulls daily NTM EV/EBITDA history for a ticker over a configurable lookback. Data flow:
+Pulls daily trading and broker estimate data for a ticker, computes historical NTM and 2Y-forward EV/EBITDA multiples and growth rates, and produces three charts.
 
-1. `templates/multiple_history_fetcher.xlsx` — live CapIQ workbook with one row per business day (up to 1,500 row capacity). Columns: stock price, share count, balance sheet items (point-in-time), NTM EBITDA, computed Market Cap / EV / Multiple.
-2. `companies/output/<TICKER>/multiple_history_<TICKER>.xlsx` — hardcoded values copy. Generated per ticker. Standalone (works without CapIQ).
-3. `companies/output/<TICKER>/multiple_history_<TICKER>.png` — dual-axis chart (stock price + NTM multiple).
+**Data flow:**
+1. `templates/multiple_history_fetcher.xlsx` — live CapIQ workbook (~6 years × ~252 business days = ~1,500-row capacity). 23 columns: stock price, share count, balance sheet items (point-in-time), 4 calendar-year EBITDA estimates (IQ_CY through IQ_CY+3), and computed Market Cap / EV / LTM / NTM / NTM+12 / multiples / growth rates.
+2. `companies/output/<TICKER>/multiple_history_<TICKER>.xlsx` — hardcoded values copy. Standalone (works without CapIQ).
+3. Three PNG charts in `companies/output/<TICKER>/`:
+   - `multiple_history_<TICKER>.png` — Stock Price + NTM EV/EBITDA
+   - `multiple_growth_<TICKER>.png` — NTM EV/EBITDA + NTM Growth %
+   - `multiple_2y_<TICKER>.png` — 2Y Fwd EV/EBITDA + 2Y Fwd Growth % (CAGR)
+
+**Construction notes:**
+- LTM, NTM, and NTM+12 EBITDA are all built via weighted blends of two adjacent IQ_CY estimates (with weights based on calendar position relative to the as-of date). Symmetric construction ensures growth ratios (NTM/LTM, etc.) are clean — no fiscal-year-boundary artifacts. Tradeoff: smoothes out intra-year seasonality, so absolute LTM values differ slightly from actuals-based LTM.
+- IQ_CY returns the most recently completed calendar year (not current). IQ_CY+1 is the current year; IQ_CY+3 is two years out.
+- For tickers without IQ_CY+3 broker coverage, the 2Y forward columns fall back to blank via IFERROR. Chart 3 is skipped if fewer than 50 rows have valid 2Y forward data (with a clear console message).
 
 Run via: `python -m companies.scripts.fetch_multiple_history <TICKER> [--end-date YYYY-MM-DD] [--lookback-years N]`
 
-Defaults: end date = today, lookback = 5 years. Outlier filter for the chart drops multiples ≤ 0 or > 100x. No EBITDA smoothing — the time-weighted NTM construction handles fiscal-year transitions cleanly; visible step-changes in the series reflect actual estimate revisions, which are signal not noise.
+Defaults: end date = today, lookback = 5 years.
 
-EV uses point-in-time balance sheet values (`IQ_LP` returns most recent filed period as of the formula's date arg), so cash/debt update only on filing dates while market cap updates daily.
+EV uses point-in-time balance sheet values (IQ_LP), so cash/debt update only on filing dates while market cap updates daily.

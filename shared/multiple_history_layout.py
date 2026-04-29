@@ -10,7 +10,8 @@ is ever required, then rerun `shared.scaffold_multiple_history_fetcher`.
 
 Universal conventions apply: column A is a 2.71-wide spacer, row 1 is
 blank, B2 carries a dynamic title formula. Field labels live in column B
-in the header section; the data grid runs B (date) through O (multiple).
+in the header section; the data grid runs B (date) through X (2Y fwd
+growth %).
 """
 from __future__ import annotations
 
@@ -33,20 +34,29 @@ ROW_GENERATED = 9
 # --- Data columns ---
 # (letter, header, role)  role ∈ {"date", "input_formula", "calc"}
 DATA_COLUMNS = [
-    ("B", "Date",                   "date"),
-    ("C", "Stock Price",            "input_formula"),
-    ("D", "Diluted Shares Out",     "input_formula"),
-    ("E", "Cash & Equivalents",     "input_formula"),
-    ("F", "ST Investments",         "input_formula"),
-    ("G", "Total Debt",             "input_formula"),
-    ("H", "Preferred Equity",       "input_formula"),
-    ("I", "Minority Interest",      "input_formula"),
-    ("J", "Equity Investments",     "input_formula"),
-    ("K", "Marketable Securities",  "input_formula"),
-    ("L", "Market Cap",             "calc"),
-    ("M", "Enterprise Value",       "calc"),
-    ("N", "NTM EBITDA",             "input_formula"),
-    ("O", "NTM EV/EBITDA Multiple", "calc"),
+    ("B", "Date",                      "date"),
+    ("C", "Stock Price",               "input_formula"),
+    ("D", "Diluted Shares Out",        "input_formula"),
+    ("E", "Cash & Equivalents",        "input_formula"),
+    ("F", "ST Investments",            "input_formula"),
+    ("G", "Total Debt",                "input_formula"),
+    ("H", "Preferred Equity",          "input_formula"),
+    ("I", "Minority Interest",         "input_formula"),
+    ("J", "Equity Investments",        "input_formula"),
+    ("K", "Marketable Securities",     "input_formula"),
+    ("L", "Market Cap",                "calc"),
+    ("M", "Enterprise Value",          "calc"),
+    ("N", "IQ_CY EBITDA",              "input_formula"),
+    ("O", "IQ_CY+1 EBITDA",            "input_formula"),
+    ("P", "IQ_CY+2 EBITDA",            "input_formula"),
+    ("Q", "IQ_CY+3 EBITDA",            "input_formula"),
+    ("R", "LTM EBITDA",                "calc"),
+    ("S", "NTM EBITDA",                "calc"),
+    ("T", "NTM+12 EBITDA",             "calc"),
+    ("U", "NTM EV/EBITDA",             "calc"),
+    ("V", "2Y Fwd EV/EBITDA",          "calc"),
+    ("W", "NTM Growth %",              "calc"),
+    ("X", "2Y Fwd Growth % (CAGR)",    "calc"),
 ]
 
 # Formula templates per input column. {t} = ticker named range,
@@ -64,14 +74,27 @@ INPUT_FORMULAS = {
     "I": '=IFERROR(_xll.ciqfunctions.udf.CIQ({t}, "IQ_MINORITY_INTEREST", , {d}), "")',
     "J": '=IFERROR(_xll.ciqfunctions.udf.CIQ({t}, "IQ_EQUITY_METHOD", , {d}), "")',
     "K": '=IFERROR(_xll.ciqfunctions.udf.CIQ({t}, "IQ_LT_Mark_Securities", , {d}), "")',
-    "N": '=IFERROR(_xll.ciqfunctions.udf.CIQ({t}, "IQ_EBITDA_EST", IQ_NTM, {d}, , , "USD"), "")',
+    "N": '=IFERROR(_xll.ciqfunctions.udf.CIQ({t}, "IQ_EBITDA_EST", IQ_CY, {d}, , , "USD"), "")',
+    "O": '=IFERROR(_xll.ciqfunctions.udf.CIQ({t}, "IQ_EBITDA_EST", IQ_CY+1, {d}, , , "USD"), "")',
+    "P": '=IFERROR(_xll.ciqfunctions.udf.CIQ({t}, "IQ_EBITDA_EST", IQ_CY+2, {d}, , , "USD"), "")',
+    "Q": '=IFERROR(_xll.ciqfunctions.udf.CIQ({t}, "IQ_EBITDA_EST", IQ_CY+3, {d}, , , "USD"), "")',
 }
 
 # Calc templates. {r} = row number (e.g., 11).
+# LTM/NTM/NTM+12 use weighted CY blends keyed off the row's date in column B:
+#   frac_remaining = (DATE(YEAR(B)+1,1,1)-B)/365 — fraction of current CY ahead of B
+#   frac_elapsed   = 1 - frac_remaining
+# Symmetric construction so growth ratios (NTM/LTM, etc.) are clean.
 CALC_FORMULAS = {
     "L": '=IFERROR(C{r}*D{r}, "")',
     "M": '=IFERROR(L{r}-E{r}-F{r}+G{r}+H{r}+I{r}-J{r}-K{r}, "")',
-    "O": '=IFERROR(M{r}/N{r}, "")',
+    "R": '=IFERROR(((DATE(YEAR(B{r})+1,1,1)-B{r})/365)*N{r}+(1-(DATE(YEAR(B{r})+1,1,1)-B{r})/365)*O{r}, "")',
+    "S": '=IFERROR(((DATE(YEAR(B{r})+1,1,1)-B{r})/365)*O{r}+(1-(DATE(YEAR(B{r})+1,1,1)-B{r})/365)*P{r}, "")',
+    "T": '=IFERROR(((DATE(YEAR(B{r})+1,1,1)-B{r})/365)*P{r}+(1-(DATE(YEAR(B{r})+1,1,1)-B{r})/365)*Q{r}, "")',
+    "U": '=IFERROR(M{r}/S{r}, "")',
+    "V": '=IFERROR(M{r}/T{r}, "")',
+    "W": '=IFERROR(S{r}/R{r}-1, "")',
+    "X": '=IFERROR((T{r}/R{r})^(1/2)-1, "")',
 }
 
 # Per-column number formats applied in both fetcher and hardcoded copy.
@@ -89,7 +112,16 @@ COLUMN_NUMBER_FORMATS = {
     "L": "#,##0;(#,##0);-",
     "M": "#,##0;(#,##0);-",
     "N": "#,##0;(#,##0);-",
-    "O": '0.0"x"',
+    "O": "#,##0;(#,##0);-",
+    "P": "#,##0;(#,##0);-",
+    "Q": "#,##0;(#,##0);-",
+    "R": "#,##0;(#,##0);-",
+    "S": "#,##0;(#,##0);-",
+    "T": "#,##0;(#,##0);-",
+    "U": '0.0"x"',
+    "V": '0.0"x"',
+    "W": "0.0%",
+    "X": "0.0%",
 }
 
 COLUMN_WIDTHS = {
@@ -100,8 +132,10 @@ COLUMN_WIDTHS = {
     "E": 13, "F": 13, "G": 13, "H": 13, "I": 13, "J": 13, "K": 13,
     "L": 14,
     "M": 14,
-    "N": 13,
-    "O": 12,
+    "N": 13, "O": 13, "P": 13, "Q": 13,
+    "R": 13, "S": 13, "T": 13,
+    "U": 12, "V": 12,
+    "W": 11, "X": 11,
 }
 
 # Named ranges (workbook-scoped).
