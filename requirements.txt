@@ -5,3 +5,5 @@ fredapi
 matplotlib
 pyyaml
 xlwings
+requests
+yfinance
