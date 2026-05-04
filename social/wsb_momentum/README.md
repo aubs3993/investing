@@ -82,40 +82,80 @@ do not set up OAuth or install `praw`.
 
 ## Scheduling on Windows (30-minute cadence)
 
-The collector and the price fetcher are independent. Schedule both with
-`schtasks`. Replace the path with your local clone if different.
+Three tasks: `WSB-Collector` and `WSB-PriceFetcher` every 30 min (offset
+5 min so they don't overlap), `WSB-Fundamentals` daily at 5:00 PM local.
+All three wake the machine from sleep.
 
-`schtasks /create` does not directly expose the "Wake the computer to run
-this task" flag, so we create the task first and then enable wake via
-`PowerShell`'s `Set-ScheduledTask` cmdlet.
+We register them via PowerShell's `Register-ScheduledTask` cmdlet, not
+`schtasks /create`. The `schtasks` form chokes on the embedded semicolon
+in the inline `cd <repo>; python -m ...` payload (PowerShell mangles the
+quoting at the native-call boundary). `Register-ScheduledTask` builds
+the action via cmdlet objects, sets working directory cleanly, and lets
+us configure WakeToRun in the same call.
+
+**Logon mode — Option A vs Option B.** This script uses `Interactive`
+logon: tasks fire whenever you're signed in, including when the screen
+is locked. No admin privileges required. The downside is that tasks
+*don't* fire when you're fully signed out (e.g. between a reboot and the
+next sign-in). If you need "run whether signed in or not", change
+`-LogonType Interactive` to `-LogonType S4U` and run the script from an
+**elevated** PowerShell — S4U registration requires admin to grant the
+"log on as a batch job" right.
+
+Edit the two paths at the top, paste into a PowerShell window, run:
 
 ```powershell
-# 1) collector — runs at :00 and :30 every hour, indefinitely
-schtasks /create /tn "WSB-Collector" `
-  /tr "powershell -NoProfile -WindowStyle Hidden -Command `"cd 'C:\Users\aubre\Documents\python_projects\investing'; python -m social.wsb_momentum.collector`"" `
-  /sc minute /mo 30 /st 00:00 /f
+$repo  = 'C:\Users\aubre\Documents\python_projects\investing'
+$pyExe = 'C:\Users\aubre\AppData\Local\Programs\Python\Python314\python.exe'
 
-# 2) price fetcher — same cadence, offset 5 minutes so it doesn't fight the collector
-schtasks /create /tn "WSB-PriceFetcher" `
-  /tr "powershell -NoProfile -WindowStyle Hidden -Command `"cd 'C:\Users\aubre\Documents\python_projects\investing'; python -m social.wsb_momentum.price_fetcher`"" `
-  /sc minute /mo 30 /st 00:05 /f
+$settings = New-ScheduledTaskSettingsSet `
+    -WakeToRun `
+    -AllowStartIfOnBatteries `
+    -DontStopIfGoingOnBatteries `
+    -StartWhenAvailable `
+    -ExecutionTimeLimit (New-TimeSpan -Minutes 25)
 
-# 3) fundamentals fetcher — DAILY at 5:00pm ET (PowerShell uses local time;
-#    use /st 17:00 if your machine is on US Eastern).
-#    Running after market close means the day's full trading volume is
-#    reflected in short_ratio (avg daily volume denominator), and FINRA
-#    publishes short-interest reports after-hours, so an after-close pull
-#    is more likely to catch fresh data on FINRA publication days.
-schtasks /create /tn "WSB-Fundamentals" `
-  /tr "powershell -NoProfile -WindowStyle Hidden -Command `"cd 'C:\Users\aubre\Documents\python_projects\investing'; python -m social.wsb_momentum.fundamentals_fetcher`"" `
-  /sc daily /st 17:00 /f
+# Interactive logon: runs whenever signed in (locked screen counts).
+# For S4U ("run whether signed in or not"), swap to -LogonType S4U and
+# run this script from an elevated PowerShell.
+$principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
 
-# 4) Enable "Wake the computer to run this task" on all three tasks
-foreach ($name in @("WSB-Collector", "WSB-PriceFetcher", "WSB-Fundamentals")) {
-    $task = Get-ScheduledTask -TaskName $name
-    $task.Settings.WakeToRun = $true
-    Set-ScheduledTask -InputObject $task | Out-Null
+function Register-WsbTask {
+    param([string]$Name, [string]$Module, $Trigger)
+    $action = New-ScheduledTaskAction `
+        -Execute $pyExe `
+        -Argument "-m $Module" `
+        -WorkingDirectory $repo
+    Register-ScheduledTask `
+        -TaskName $Name `
+        -Action $action `
+        -Trigger $Trigger `
+        -Settings $settings `
+        -Principal $principal `
+        -Force | Out-Null
+    Write-Host "  registered $Name"
 }
+
+# Every-30-min triggers: a Daily trigger at the start time, with a Repetition
+# block grafted on so it re-fires every 30 min for the rest of the day.
+$trigger30m_00 = New-ScheduledTaskTrigger -Daily -At 00:00
+$trigger30m_00.Repetition = (New-ScheduledTaskTrigger -Once -At 00:00 `
+    -RepetitionInterval (New-TimeSpan -Minutes 30) `
+    -RepetitionDuration (New-TimeSpan -Hours 23 -Minutes 59)).Repetition
+
+$trigger30m_05 = New-ScheduledTaskTrigger -Daily -At 00:05
+$trigger30m_05.Repetition = (New-ScheduledTaskTrigger -Once -At 00:05 `
+    -RepetitionInterval (New-TimeSpan -Minutes 30) `
+    -RepetitionDuration (New-TimeSpan -Hours 23 -Minutes 50)).Repetition
+
+# Daily 5:00 PM local — after market close, so the day's full trading volume
+# is in short_ratio (avg daily volume denominator) and FINRA's after-hours
+# short-interest publications have a chance to land before we pull.
+$triggerDaily17 = New-ScheduledTaskTrigger -Daily -At 17:00
+
+Register-WsbTask -Name 'WSB-Collector'    -Module 'social.wsb_momentum.collector'            -Trigger $trigger30m_00
+Register-WsbTask -Name 'WSB-PriceFetcher' -Module 'social.wsb_momentum.price_fetcher'        -Trigger $trigger30m_05
+Register-WsbTask -Name 'WSB-Fundamentals' -Module 'social.wsb_momentum.fundamentals_fetcher' -Trigger $triggerDaily17
 ```
 
 **Why daily for fundamentals (and not 30-min like the other two)?** The
@@ -152,14 +192,31 @@ powercfg /hibernate off
 
 Sleep is fine; hibernation is what breaks it.
 
-Inspect / remove with:
+Inspect / trigger / remove:
 
 ```powershell
-schtasks /query /tn "WSB-Collector"
-schtasks /delete /tn "WSB-Collector" /f
+# full settings dump (action command, schedule, next run time, etc.)
+schtasks /query /tn WSB-Collector /v /fo LIST
+
+# WakeToRun isn't surfaced by schtasks — check via PowerShell:
+Get-ScheduledTask -TaskName 'WSB-*' |
+  Select-Object TaskName, @{n='WakeToRun';e={$_.Settings.WakeToRun}},
+                          @{n='LogonType';e={$_.Principal.LogonType}}
+
+# fire one immediately as a smoke test
+schtasks /run /tn WSB-Collector
+
+# remove
+schtasks /delete /tn WSB-Collector /f
 ```
 
-If you want logs, append `>> output\collector.log 2>&1` to the inner command.
+A pre-first-run task shows `Last Result: 267011` — that's the
+"task has not yet run" code, not an error. After the first successful
+run it flips to `0`.
+
+If you want logs, wrap the action `-Argument` in a redirect or append
+`-RedirectStandardOutput` / `-RedirectStandardError` paths to the
+`New-ScheduledTaskAction` call.
 
 ### cron equivalent (Mac/Linux)
 
