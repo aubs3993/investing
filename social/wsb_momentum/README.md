@@ -91,25 +91,27 @@ this task" flag, so we create the task first and then enable wake via
 
 ```powershell
 # 1) collector — runs at :00 and :30 every hour, indefinitely
-schtasks /create /tn "WSB Momentum - Collector" `
+schtasks /create /tn "WSB-Collector" `
   /tr "powershell -NoProfile -WindowStyle Hidden -Command `"cd 'C:\Users\aubre\Documents\python_projects\investing'; python -m social.wsb_momentum.collector`"" `
   /sc minute /mo 30 /st 00:00 /f
 
 # 2) price fetcher — same cadence, offset 5 minutes so it doesn't fight the collector
-schtasks /create /tn "WSB Momentum - PriceFetcher" `
+schtasks /create /tn "WSB-PriceFetcher" `
   /tr "powershell -NoProfile -WindowStyle Hidden -Command `"cd 'C:\Users\aubre\Documents\python_projects\investing'; python -m social.wsb_momentum.price_fetcher`"" `
   /sc minute /mo 30 /st 00:05 /f
 
-# 3) fundamentals fetcher — DAILY at 5:00am ET (= 09:00 UTC; PowerShell uses local time).
-#    Adjust the /st value to 05:00 if your machine is on US Eastern.
-#    This runs before US market open so each trading day starts with fresh
-#    shares-outstanding / short-interest / float data on file.
-schtasks /create /tn "WSB Momentum - FundamentalsFetcher" `
+# 3) fundamentals fetcher — DAILY at 5:00pm ET (PowerShell uses local time;
+#    use /st 17:00 if your machine is on US Eastern).
+#    Running after market close means the day's full trading volume is
+#    reflected in short_ratio (avg daily volume denominator), and FINRA
+#    publishes short-interest reports after-hours, so an after-close pull
+#    is more likely to catch fresh data on FINRA publication days.
+schtasks /create /tn "WSB-Fundamentals" `
   /tr "powershell -NoProfile -WindowStyle Hidden -Command `"cd 'C:\Users\aubre\Documents\python_projects\investing'; python -m social.wsb_momentum.fundamentals_fetcher`"" `
-  /sc daily /st 05:00 /f
+  /sc daily /st 17:00 /f
 
 # 4) Enable "Wake the computer to run this task" on all three tasks
-foreach ($name in @("WSB Momentum - Collector", "WSB Momentum - PriceFetcher", "WSB Momentum - FundamentalsFetcher")) {
+foreach ($name in @("WSB-Collector", "WSB-PriceFetcher", "WSB-Fundamentals")) {
     $task = Get-ScheduledTask -TaskName $name
     $task.Settings.WakeToRun = $true
     Set-ScheduledTask -InputObject $task | Out-Null
@@ -153,8 +155,8 @@ Sleep is fine; hibernation is what breaks it.
 Inspect / remove with:
 
 ```powershell
-schtasks /query /tn "WSB Momentum - Collector"
-schtasks /delete /tn "WSB Momentum - Collector" /f
+schtasks /query /tn "WSB-Collector"
+schtasks /delete /tn "WSB-Collector" /f
 ```
 
 If you want logs, append `>> output\collector.log 2>&1` to the inner command.
@@ -164,7 +166,7 @@ If you want logs, append `>> output\collector.log 2>&1` to the inner command.
 ```
 */30 * * * * cd /path/to/investing && /usr/bin/python3 -m social.wsb_momentum.collector >> social/wsb_momentum/output/collector.log 2>&1
 5,35 * * * * cd /path/to/investing && /usr/bin/python3 -m social.wsb_momentum.price_fetcher >> social/wsb_momentum/output/price_fetcher.log 2>&1
-0 5 * * * cd /path/to/investing && /usr/bin/python3 -m social.wsb_momentum.fundamentals_fetcher >> social/wsb_momentum/output/fundamentals.log 2>&1
+0 17 * * * cd /path/to/investing && /usr/bin/python3 -m social.wsb_momentum.fundamentals_fetcher >> social/wsb_momentum/output/fundamentals.log 2>&1
 ```
 
 ### Limitations of scheduled collection
