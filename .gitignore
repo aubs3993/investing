@@ -26,10 +26,8 @@ env/
 
 macro/output/**/*
 companies/output/**/*
-social/wsb_momentum/output/**/*
 !macro/output/**/
 !companies/output/**/
-!social/wsb_momentum/output/**/
 !**/.gitkeep
 !macro/output/**/*.png
 
