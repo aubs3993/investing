@@ -82,6 +82,19 @@ The Notion MCP is connected for local sessions. When asked to update Notion:
 - Use `xlwings` only when the workflow requires live Excel calc, formula evaluation, or refreshing
   data connections (Power Query, external links).
 
+### Excel MCP (`excel-mcp-server`)
+An openpyxl-based Excel MCP server (haris-musa's `excel-mcp-server`, registered at user scope via
+`cmd /c uvx excel-mcp-server stdio`) exposes `mcp__excel__*` tools in local Claude Code sessions.
+- **Use it for:** ad-hoc inspection of `.xlsx` files during a session (reading a filled model, peeking
+  at the `_CapIQ_Data` / `_Broker_Data` tabs, sanity-checking outputs) and throwaway / scratch
+  spreadsheets.
+- **Do NOT use it for:** filling `templates/` or the committed model pipeline (`populate_drivers.py`,
+  `fetch_capiq.py`, etc.). Those stay deterministic, version-controlled openpyxl scripts that write to
+  **named ranges** — the MCP operates in A1 cell references and would break that convention and
+  reproducibility.
+- **Limitation:** it's openpyxl-based, so it does not evaluate formulas and cannot touch CapIQ. CapIQ /
+  broker refresh still requires `xlwings` + live Excel.
+
 ### Excel template workflow
 - Scripts that fill templates must:
   1. Copy the master template from `templates/` to the destination path.
