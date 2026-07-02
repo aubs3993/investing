@@ -16,12 +16,34 @@ import sys
 from pathlib import Path
 
 from openpyxl import load_workbook
+from openpyxl.utils import column_index_from_string
+
+from shared import broker_layout, capiq_layout
+from shared.excel_helpers import validate_field_labels
+from shared.tickers import fs_ticker
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
+# Cell coordinates sourced from the layout modules (the source of truth for
+# the hidden data tabs). Single-value cells (last fetch, FY years, sentiment)
+# live in column C, same as the FY1 means.
+PNL_ROW = {label: r for r, label, *_ in broker_layout.PNL}
+SENT_ROW = {label: r for r, label, _ in broker_layout.SENTIMENT}
+COL_FY1_MEAN, COL_FY2_MEAN, COL_FY3_MEAN = (
+    column_index_from_string(c) for c in broker_layout.MEAN_COLS
+)
+COL_FY1_HIGH = column_index_from_string(broker_layout.HIGH_COL)
+COL_FY1_LOW = column_index_from_string(broker_layout.LOW_COL)
+COL_FY1_COUNT = column_index_from_string(broker_layout.COUNT_COL)
+COL_VALUE = COL_FY1_MEAN
+
+CAPIQ_HIST_ROW = {label: r for r, label in capiq_layout.HISTORICALS}
+CAPIQ_CUR_ROW = {label: r for r, label, _ in capiq_layout.CURRENT_STATE}
+
 
 def _model_path_for(ticker: str) -> Path:
-    return REPO_ROOT / "companies" / "output" / ticker / f"{ticker}_model.xlsx"
+    fs = fs_ticker(ticker)
+    return REPO_ROOT / "companies" / "output" / fs / f"{fs}_model.xlsx"
 
 
 def _safe_div(num, den):
@@ -40,9 +62,12 @@ def _safe_sub(a, b):
 
 
 def _safe_growth(prev, curr):
-    if prev in (None, 0) or curr is None:
+    try:
+        if prev in (None, 0) or curr is None:
+            return None
+        return curr / prev - 1
+    except TypeError:  # non-numeric, e.g. '#N/A' error strings on the data tab
         return None
-    return curr / prev - 1
 
 
 def _get(ws, row, col):
@@ -78,20 +103,26 @@ def extract(ticker: str) -> dict:
     bk = wb["_Broker_Data"]
     cap = wb["_CapIQ_Data"]
 
+    # Abort on layout drift instead of silently reading the wrong cells.
+    layout_hint = ("Fix: re-run `python -m shared.scaffold_template` and re-fetch, "
+                   "OR update the layout module to match the workbook.")
+    validate_field_labels(bk, broker_layout.all_field_rows(), "_Broker_Data", layout_hint)
+    validate_field_labels(cap, capiq_layout.all_field_rows(), "_CapIQ_Data", layout_hint)
+
     fy_cal = {
-        "FY1": _get(bk, 4, 2),
-        "FY2": _get(bk, 5, 2),
-        "FY3": _get(bk, 6, 2),
+        "FY1": _get(bk, broker_layout.ROW_FY1_YEAR, COL_VALUE),
+        "FY2": _get(bk, broker_layout.ROW_FY2_YEAR, COL_VALUE),
+        "FY3": _get(bk, broker_layout.ROW_FY3_YEAR, COL_VALUE),
     }
 
-    # P&L grid: rows 10-17, cols B/C/D = FY1/FY2/FY3 mean, E/F = FY1 high/low, G = FY1 #est
+    # P&L grid (broker_layout.PNL rows): C/D/E = FY1/FY2/FY3 mean, F/G = FY1 high/low, H = FY1 #est
     def metric(row):
-        fy1_mean = _get(bk, row, 2)
-        fy2_mean = _get(bk, row, 3)
-        fy3_mean = _get(bk, row, 4)
-        fy1_high = _get(bk, row, 5)
-        fy1_low = _get(bk, row, 6)
-        fy1_n = _get(bk, row, 7)
+        fy1_mean = _get(bk, row, COL_FY1_MEAN)
+        fy2_mean = _get(bk, row, COL_FY2_MEAN)
+        fy3_mean = _get(bk, row, COL_FY3_MEAN)
+        fy1_high = _get(bk, row, COL_FY1_HIGH)
+        fy1_low = _get(bk, row, COL_FY1_LOW)
+        fy1_n = _get(bk, row, COL_FY1_COUNT)
         dispersion = None
         if isinstance(fy1_high, (int, float)) and isinstance(fy1_low, (int, float)) and isinstance(fy1_mean, (int, float)) and fy1_mean:
             dispersion = (fy1_high - fy1_low) / fy1_mean
@@ -104,18 +135,19 @@ def extract(ticker: str) -> dict:
             "FY3": {"mean": fy3_mean},
         }
 
-    revenue = metric(10)
-    gross_profit = metric(11)
-    ebitda = metric(12)
-    ebit = metric(13)
-    net_income = metric(14)
-    eps = metric(15)
-    cfo = metric(16)
-    capex = metric(17)
+    revenue = metric(PNL_ROW["Revenue"])
+    gross_profit = metric(PNL_ROW["Gross Profit"])
+    ebitda = metric(PNL_ROW["EBITDA"])
+    ebit = metric(PNL_ROW["EBIT"])
+    net_income = metric(PNL_ROW["Net Income"])
+    eps = metric(PNL_ROW["EPS (Diluted)"])
+    cfo = metric(PNL_ROW["CFO"])
+    capex = metric(PNL_ROW["CapEx"])
 
-    # FY-1 historical revenue from CapIQ tab is the base for FY1 implied growth.
-    rev_fy_minus_1 = _get(cap, 25, 4)  # _CapIQ_Data!D25
-    revenue["FY1"]["implied_growth"] = _safe_growth(rev_fy_minus_1, revenue["FY1"]["mean"])
+    # Most recent completed-FY revenue from the CapIQ tab is the base for FY1
+    # implied growth — the same base broker_layout.IMPLIED uses in the model.
+    rev_fy = _get(cap, CAPIQ_HIST_ROW["Revenue"], capiq_layout.COL_FY)
+    revenue["FY1"]["implied_growth"] = _safe_growth(rev_fy, revenue["FY1"]["mean"])
     revenue["FY2"]["implied_growth_yoy"] = _safe_growth(revenue["FY1"]["mean"], revenue["FY2"]["mean"])
     revenue["FY3"]["implied_growth_yoy"] = _safe_growth(revenue["FY2"]["mean"], revenue["FY3"]["mean"])
 
@@ -131,20 +163,20 @@ def extract(ticker: str) -> dict:
         "capex_pct_revenue_FY1": _safe_div(capex["FY1"]["mean"], revenue["FY1"]["mean"]),
     }
 
-    # Sentiment block
-    n_analysts = _get(bk, 28, 2)
-    avg_target = _get(bk, 29, 2)
-    implied_upside = _get(bk, 30, 2)
-    avg_rec = _get(bk, 31, 2)
-    rec_dist = _get(bk, 32, 2)
+    # Sentiment block (broker_layout.SENTIMENT rows, values in column C)
+    n_analysts = _get(bk, SENT_ROW["Number of Analysts Covering"], COL_VALUE)
+    avg_target = _get(bk, SENT_ROW["Average Price Target"], COL_VALUE)
+    implied_upside = _get(bk, SENT_ROW["Implied Upside %"], COL_VALUE)
+    avg_rec = _get(bk, SENT_ROW["Average Recommendation (1=Buy,5=Sell)"], COL_VALUE)
+    rec_dist = _get(bk, SENT_ROW["Recommendation Distribution"], COL_VALUE)
 
-    current_price = _get(cap, 13, 5)  # _CapIQ_Data!E13
+    current_price = _get(cap, CAPIQ_CUR_ROW["Current Price"], capiq_layout.COL_CURRENT)
     if implied_upside in (None, "") and isinstance(avg_target, (int, float)) and isinstance(current_price, (int, float)) and current_price:
         implied_upside = avg_target / current_price - 1
 
     return {
         "ticker": ticker,
-        "fetch_timestamp": _get(bk, 2, 2),
+        "fetch_timestamp": _get(bk, broker_layout.ROW_LAST_FETCH, COL_VALUE),
         "broker_estimates": {
             "fy_calendar": fy_cal,
             "revenue": revenue,

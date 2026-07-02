@@ -18,7 +18,6 @@ Workflow:
 from __future__ import annotations
 
 import argparse
-import re
 import sys
 import time
 import traceback
@@ -26,20 +25,14 @@ from datetime import datetime
 from pathlib import Path
 
 from shared import capiq_layout
+from shared.excel_helpers import count_errors, format_money
 from shared.excel_session import AppPrefs, get_or_create_app, workbook_already_open
 from shared.model_path import resolve_model_path
+from shared.tickers import validate_ticker
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FETCHER_PATH = REPO_ROOT / "templates" / "capiq_fetcher.xlsx"
 ASYNC_BUFFER_SECS = 3
-TICKER_RE = re.compile(r"^[A-Z][A-Z0-9.\-:]{0,14}$")
-
-
-def _validate_ticker(raw: str) -> str:
-    t = (raw or "").strip().upper()
-    if not TICKER_RE.match(t):
-        raise SystemExit(f"Invalid ticker: {raw!r}. Expected something like AAPL, BRK.B, 700:HK.")
-    return t
 
 
 def _expected_field_labels():
@@ -81,8 +74,14 @@ def _validate_layout_match(fetcher_sheet, capiq_sheet) -> None:
 
 
 def _check_capiq_loaded(fetcher_sheet) -> None:
-    """F12 holds IQ_COMPANY_NAME; if CapIQ plugin is missing, it returns #NAME?."""
-    val = fetcher_sheet.range((capiq_layout.METADATA[0][0], capiq_layout.COL_CURRENT)).value
+    """F12 holds IQ_COMPANY_NAME; if CapIQ plugin is missing, it returns #NAME?.
+
+    err_to_str is required: xlwings maps error cells to None by default, which
+    would silently pass this guard.
+    """
+    val = fetcher_sheet.range(
+        (capiq_layout.METADATA[0][0], capiq_layout.COL_CURRENT)
+    ).options(err_to_str=True).value
     if isinstance(val, str) and val.strip().startswith("#NAME"):
         raise SystemExit(
             "CapIQ plugin not loaded (F12 returned #NAME?). Open Excel manually, "
@@ -90,30 +89,8 @@ def _check_capiq_loaded(fetcher_sheet) -> None:
         )
 
 
-def _count_errors(values_2d) -> tuple[int, list[str]]:
-    err_count = 0
-    samples = []
-    for row in values_2d or []:
-        for v in row:
-            if isinstance(v, str) and v.startswith("#"):
-                err_count += 1
-                if len(samples) < 5:
-                    samples.append(v)
-    return err_count, samples
-
-
-def _format_money(v):
-    if isinstance(v, (int, float)):
-        return f"${v:,.0f}M" if abs(v) >= 1_000_000 else f"${v:,.2f}"
-    return repr(v)
-
-
 def fetch(ticker: str, headless: bool = False, model_path_override: str | None = None) -> None:
     model_path = resolve_model_path(ticker, model_path_override)
-    if not model_path.exists():
-        raise SystemExit(
-            f"Missing {model_path}. Run `python -m shared.scaffold_template` first."
-        )
     if not FETCHER_PATH.exists():
         raise SystemExit(
             f"Missing {FETCHER_PATH}. The fetcher is hand-maintained and is the "
@@ -172,11 +149,15 @@ def fetch(ticker: str, headless: bool = False, model_path_override: str | None =
 
         _validate_layout_match(fetcher_sheet, capiq_sheet)
 
-        # Copy used range Fetcher -> _CapIQ_Data, values only.
+        # Copy used range Fetcher -> _CapIQ_Data, values only. err_to_str so
+        # error cells arrive as '#N/A' strings (visible downstream + countable)
+        # instead of xlwings' default None.
         used = fetcher_sheet.used_range
         last_row = used.last_cell.row
         last_col = used.last_cell.column
-        values = fetcher_sheet.range((1, 1), (last_row, last_col)).value
+        values = fetcher_sheet.range(
+            (1, 1), (last_row, last_col)
+        ).options(err_to_str=True).value
 
         capiq_sheet.range((1, 1), (last_row, last_col)).value = values
 
@@ -188,7 +169,7 @@ def fetch(ticker: str, headless: bool = False, model_path_override: str | None =
         capiq_sheet.range((capiq_layout.ROW_FETCHER_DATE, 3)).number_format = "mm/dd/yyyy hh:mm"
 
         model_wb.save()
-        err_count, samples = _count_errors(values)
+        err_count, samples = count_errors(values)
         cells_refreshed = sum(
             1 for row in (values or []) for v in row if v not in (None, "")
         )
@@ -198,23 +179,25 @@ def fetch(ticker: str, headless: bool = False, model_path_override: str | None =
         print(f"  Cells refreshed: {cells_refreshed}")
         print(f"  Errors: {err_count}" + (f"  e.g. {samples}" if samples else ""))
 
-        # Sanity-check pulls. New layout: historicals in C/D/E (FY-2/FY-1/FY);
-        # current state in F.
+        # Sanity-check pulls. Rows sourced from capiq_layout: historicals in
+        # C/D/E (FY-2/FY-1/FY); current state in F.
         def _val(addr):
             try:
                 return capiq_sheet.range(addr).value
             except Exception:
                 return None
-        rev_fy   = _val((31, capiq_layout.COL_FY))         # E31
-        ebitda_fy = _val((36, capiq_layout.COL_FY))        # E36
-        cash      = _val((21, capiq_layout.COL_CURRENT))   # F21
-        debt      = _val((23, capiq_layout.COL_CURRENT))   # F23
+        hist_row = {label: r for r, label in capiq_layout.HISTORICALS}
+        cur_row = {label: r for r, label, _ in capiq_layout.CURRENT_STATE}
+        rev_fy    = _val((hist_row["Revenue"], capiq_layout.COL_FY))
+        ebitda_fy = _val((hist_row["EBITDA"], capiq_layout.COL_FY))
+        cash      = _val((cur_row["Cash & Equivalents"], capiq_layout.COL_CURRENT))
+        debt      = _val((cur_row["Total Debt"], capiq_layout.COL_CURRENT))
         print()
         print("  Sample values:")
-        print(f"    Revenue (IQ_FY):  {_format_money(rev_fy)}")
-        print(f"    EBITDA (IQ_FY):   {_format_money(ebitda_fy)}")
-        print(f"    Cash:             {_format_money(cash)}")
-        print(f"    Total Debt:       {_format_money(debt)}")
+        print(f"    Revenue (IQ_FY):  {format_money(rev_fy)}")
+        print(f"    EBITDA (IQ_FY):   {format_money(ebitda_fy)}")
+        print(f"    Cash:             {format_money(cash)}")
+        print(f"    Total Debt:       {format_money(debt)}")
 
         if err_count:
             print(
@@ -263,9 +246,9 @@ def main(argv=None):
     parser.add_argument("--headless", action="store_true",
                         help="Run Excel hidden. Default is visible so CapIQ auth issues are easy to debug.")
     parser.add_argument("--model-path", default=None,
-                        help="Override the model file. Default: per-ticker copy if it exists, else master template.")
+                        help="Override the model file. Default: the per-ticker copy created by new_ticker.")
     args = parser.parse_args(argv)
-    ticker = _validate_ticker(args.ticker)
+    ticker = validate_ticker(args.ticker)
     fetch(ticker, headless=args.headless, model_path_override=args.model_path)
 
 

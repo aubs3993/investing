@@ -15,50 +15,18 @@ from pathlib import Path
 
 from openpyxl import Workbook
 from openpyxl.comments import Comment
-from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.workbook.defined_name import DefinedName
 
 from shared import broker_layout
+# Styling constants + style_* helpers are shared across all scaffolders.
+from shared.excel_helpers import (
+    BANNER_FONT, LABEL, LABEL_BOLD, TITLE_FONT,
+    style_formula, style_header, style_input,
+)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FETCHER_PATH = REPO_ROOT / "templates" / "broker_fetcher.xlsx"
 TICKER_REF = "broker_fetcher_ticker"
-
-ARIAL = "Arial"
-ARIAL_SIZE = 10
-
-BLUE = "0000FF"
-WHITE = "FFFFFF"
-YELLOW = "FFFF99"
-HEADER_HEX = "0070C0"
-HAIR = Side(border_style="hair")
-
-INPUT_FONT = Font(color=BLUE, name=ARIAL, size=ARIAL_SIZE)
-INPUT_FILL = PatternFill("solid", fgColor=YELLOW)
-INPUT_BORDER = Border(left=HAIR, right=HAIR, top=HAIR, bottom=HAIR)
-HEADER_FONT = Font(color=WHITE, bold=True, name=ARIAL, size=ARIAL_SIZE)
-HEADER_FILL = PatternFill("solid", fgColor=HEADER_HEX)
-BANNER_FONT = Font(italic=True, color="808080", bold=True, name=ARIAL, size=ARIAL_SIZE)
-LABEL_BOLD = Font(bold=True, name=ARIAL, size=ARIAL_SIZE)
-LABEL = Font(name=ARIAL, size=ARIAL_SIZE)
-FORMULA_FONT = Font(color="000000", name=ARIAL, size=ARIAL_SIZE)
-TITLE_FONT = Font(bold=True, name=ARIAL, size=ARIAL_SIZE)
-
-
-def style_input(cell):
-    cell.font = INPUT_FONT
-    cell.fill = INPUT_FILL
-    cell.border = INPUT_BORDER
-
-
-def style_header(cell):
-    cell.font = HEADER_FONT
-    cell.fill = HEADER_FILL
-    cell.alignment = Alignment(horizontal="center", vertical="center")
-
-
-def style_formula(cell):
-    cell.font = FORMULA_FONT
 
 
 def _est_args(ticker_ref, period, omit_currency):

@@ -119,7 +119,7 @@ An openpyxl-based Excel MCP server (haris-musa's `excel-mcp-server`, registered 
 ### Broker estimates integration
 - Broker consensus forecasts flow from `templates/broker_fetcher.xlsx` (live `IQ_EST_*` formulas) into `templates/company_model.xlsx` → hidden `_Broker_Data` tab.
 - `shared/broker_layout.py` is the shared layout source of truth (mirror of `capiq_layout.py`).
-- Implied growth/margin rows (B20:B25) and implied upside (B30) live as formulas in the main template, not in the fetcher — they reference `_CapIQ_Data` historicals so they update when those refresh.
+- Implied growth/margin rows (C23:C28) and implied upside (C33) live as formulas in the main template, not in the fetcher — they reference `_CapIQ_Data` historicals so they update when those refresh.
 - Refresh via `python -m shared.fetch_broker_estimates <TICKER>`.
 
 ### Per-ticker workflow
@@ -132,7 +132,7 @@ An openpyxl-based Excel MCP server (haris-musa's `excel-mcp-server`, registered 
 7. **Populate model:** `python -m companies.scripts.populate_drivers <TICKER>`
 8. **Final review:** Open model in Excel.
 
-The split between research (Claude-driven) and populate (deterministic) means values can be regenerated without re-running research. Both fetch scripts auto-detect the per-ticker model copy if it exists, so the master template stays clean.
+The split between research (Claude-driven) and populate (deterministic) means values can be regenerated without re-running research. Both fetch scripts write to the per-ticker model copy and abort if it doesn't exist yet (only an explicit `--model-path` can target another file), so the master template stays clean.
 
 ### Notion structure per company
 Each company page in Notion has two distinct sections:

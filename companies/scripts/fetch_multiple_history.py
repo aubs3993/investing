@@ -22,7 +22,6 @@ Workflow:
 from __future__ import annotations
 
 import argparse
-import re
 import sys
 import time
 import traceback
@@ -30,41 +29,22 @@ from datetime import datetime, date as date_cls
 from pathlib import Path
 
 from openpyxl import Workbook
-from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import column_index_from_string
-from openpyxl.workbook.defined_name import DefinedName
 
 from shared import multiple_history_layout as layout
+# Styles for the hardcoded copy come from shared.excel_helpers (same module
+# the fetcher scaffolder uses, so the two look identical apart from values
+# vs. formulas).
+from shared.excel_helpers import (
+    BANNER_FONT, FORMULA_FONT as VALUE_FONT, INPUT_BORDER, INPUT_FILL,
+    INPUT_FONT, LABEL, LABEL_BOLD, TITLE_FONT, count_errors, style_header,
+)
 from shared.excel_session import AppPrefs, get_or_create_app, workbook_already_open
+from shared.tickers import fs_ticker, validate_ticker
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FETCHER_PATH = REPO_ROOT / "templates" / "multiple_history_fetcher.xlsx"
 ASYNC_BUFFER_SECS = 5
-TICKER_RE = re.compile(r"^[A-Z][A-Z0-9.\-:]{0,14}$")
-
-# Styles for the hardcoded copy (mirror the fetcher scaffolder so the two
-# look identical apart from values vs. formulas).
-ARIAL = "Arial"
-ARIAL_SIZE = 10
-HAIR = Side(border_style="hair")
-HEADER_FONT = Font(color="FFFFFF", bold=True, name=ARIAL, size=ARIAL_SIZE)
-HEADER_FILL = PatternFill("solid", fgColor="0070C0")
-HEADER_ALIGN = Alignment(horizontal="center", vertical="center")
-INPUT_FONT = Font(color="0000FF", name=ARIAL, size=ARIAL_SIZE)
-INPUT_FILL = PatternFill("solid", fgColor="FFFF99")
-INPUT_BORDER = Border(left=HAIR, right=HAIR, top=HAIR, bottom=HAIR)
-LABEL_BOLD = Font(bold=True, name=ARIAL, size=ARIAL_SIZE)
-LABEL = Font(name=ARIAL, size=ARIAL_SIZE)
-TITLE_FONT = Font(bold=True, name=ARIAL, size=ARIAL_SIZE)
-BANNER_FONT = Font(italic=True, color="808080", bold=True, name=ARIAL, size=ARIAL_SIZE)
-VALUE_FONT = Font(color="000000", name=ARIAL, size=ARIAL_SIZE)
-
-
-def _validate_ticker(raw: str) -> str:
-    t = (raw or "").strip().upper()
-    if not TICKER_RE.match(t):
-        raise SystemExit(f"Invalid ticker: {raw!r}. Expected something like AAPL, BRK.B, 700:HK.")
-    return t
 
 
 def _parse_date(s: str) -> date_cls:
@@ -89,41 +69,30 @@ def _generate_business_days(end: date_cls, lookback_years: int) -> list[date_cls
     return sorted([d.date() for d in dates], reverse=True)  # most recent first
 
 
-def _check_capiq_loaded(sheet) -> None:
-    """C11 holds an IFERROR-wrapped IQ_CLOSEPRICE call. After triggering calc,
-    if the underlying CIQ name didn't resolve we'll see #NAME? before the
-    IFERROR has a chance to mask anything (because IFERROR doesn't catch
-    parse-time errors). Treat any string starting with '#' as a failure.
+def _check_capiq_resolved(values_2d) -> None:
+    """Fail loudly if the CapIQ calls never resolved.
+
+    Every CapIQ formula in the fetcher is IFERROR-wrapped, so a missing or
+    unauthenticated CapIQ plugin yields blanks (IFERROR catches #NAME? like
+    any other Excel error value, and xlwings maps raw error cells to None by
+    default) — not error strings we could probe for. Instead, check after
+    readback: if no row returned a numeric stock price, the CIQ calls never
+    resolved and the output would be an empty shell.
     """
-    val = sheet.range((layout.ROW_DATA_START, 3)).value  # C11
-    if isinstance(val, str) and val.strip().startswith("#NAME"):
-        raise SystemExit(
-            "CapIQ plugin not loaded (C11 returned #NAME?). Open Excel manually, "
-            "sign in to the S&P Capital IQ plugin, then retry."
-        )
-
-
-def _count_errors(values_2d) -> tuple[int, list[str]]:
-    err_count = 0
-    samples: list[str] = []
+    price_idx = column_index_from_string(layout.col_letter("input_formula")) - 2  # col C
     for row in values_2d or []:
-        for v in row:
-            if isinstance(v, str) and v.startswith("#"):
-                err_count += 1
-                if len(samples) < 5:
-                    samples.append(v)
-    return err_count, samples
+        if len(row) > price_idx and isinstance(row[price_idx], (int, float)):
+            return
+    raise SystemExit(
+        "No stock prices came back from CapIQ. Either the S&P Capital IQ "
+        "plugin isn't loaded / signed in (open Excel manually, sign in, then "
+        "retry), or the ticker has no price coverage."
+    )
 
 
 def _last_data_col_idx() -> int:
     """Index of the last data column (currently X = 24)."""
     return column_index_from_string(layout.DATA_COLUMNS[-1][0])
-
-
-def _style_header_cell(cell):
-    cell.font = HEADER_FONT
-    cell.fill = HEADER_FILL
-    cell.alignment = HEADER_ALIGN
 
 
 def _build_hardcoded_copy(out_path: Path, ticker: str, end_date: date_cls,
@@ -176,7 +145,7 @@ def _build_hardcoded_copy(out_path: Path, ticker: str, end_date: date_cls,
 
     for letter, header, _role in layout.DATA_COLUMNS:
         col_idx = column_index_from_string(letter)
-        _style_header_cell(ws.cell(layout.ROW_COL_HEADERS, col_idx, header))
+        style_header(ws.cell(layout.ROW_COL_HEADERS, col_idx, header))
 
     last_col_idx = _last_data_col_idx()
     n = len(dates)
@@ -379,10 +348,11 @@ def _chart_2y_forward(df, ticker, out_path):
 def _generate_charts(out_xlsx: Path, out_dir: Path, ticker: str) -> dict:
     """Build all three charts. Returns a dict keyed 'price_ntm', 'ntm_growth', '2y_fwd'."""
     df = _read_chart_df(out_xlsx)
+    fs = fs_ticker(ticker)  # ':' is invalid in Windows filenames
     paths = {
-        "price_ntm": out_dir / f"multiple_history_{ticker}.png",
-        "ntm_growth": out_dir / f"multiple_growth_{ticker}.png",
-        "2y_fwd": out_dir / f"multiple_2y_{ticker}.png",
+        "price_ntm": out_dir / f"multiple_history_{fs}.png",
+        "ntm_growth": out_dir / f"multiple_growth_{fs}.png",
+        "2y_fwd": out_dir / f"multiple_2y_{fs}.png",
     }
     results = {
         "price_ntm": _chart_price_and_ntm_multiple(df, ticker, paths["price_ntm"]),
@@ -412,8 +382,9 @@ def fetch(ticker: str, end_date: date_cls, lookback_years: int,
     if not dates:
         raise SystemExit("No business days in the requested window.")
 
-    out_dir = REPO_ROOT / "companies" / "output" / ticker
-    out_xlsx = out_dir / f"multiple_history_{ticker}.xlsx"
+    fs = fs_ticker(ticker)  # ':' is invalid in Windows paths
+    out_dir = REPO_ROOT / "companies" / "output" / fs
+    out_xlsx = out_dir / f"multiple_history_{fs}.xlsx"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"Multiple history fetch: {ticker}")
@@ -474,21 +445,22 @@ def fetch(ticker: str, end_date: date_cls, lookback_years: int,
             time.sleep(8)
         time.sleep(ASYNC_BUFFER_SECS)
 
-        _check_capiq_loaded(fetcher_sheet)
-
-        # Read back populated range B..X for len(dates) rows.
+        # Read back populated range B..X for len(dates) rows. err_to_str so
+        # any unwrapped error cells arrive as strings instead of None.
         last_row = layout.ROW_DATA_START + len(dates) - 1
         values = fetcher_sheet.range(
             (layout.ROW_DATA_START, 2),
             (last_row, last_col_idx),
-        ).value
+        ).options(err_to_str=True).value
         if values is None:
             values = []
         # xlwings returns a flat list when there's only one row — normalize.
         if values and not isinstance(values[0], list):
             values = [values]
 
-        err_count, samples = _count_errors(values)
+        _check_capiq_resolved(values)
+
+        err_count, samples = count_errors(values)
         print(f"  CapIQ async resolved.  Errors: {err_count}"
               + (f"  e.g. {samples}" if samples else ""))
 
@@ -577,7 +549,7 @@ def main(argv=None):
                         help="Run Excel hidden. Default is visible for CapIQ debugging.")
     args = parser.parse_args(argv)
 
-    ticker = _validate_ticker(args.ticker)
+    ticker = validate_ticker(args.ticker)
     end_date = _parse_date(args.end_date) if args.end_date else date_cls.today()
     if args.lookback_years <= 0:
         raise SystemExit("--lookback-years must be positive.")

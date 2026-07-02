@@ -9,18 +9,18 @@ Workflow:
     1. Open templates/broker_fetcher.xlsx (visible by default).
     2. Set the `broker_fetcher_ticker` named range to the requested ticker.
     3. Force calculation, then wait for CapIQ async queries to resolve.
-    4. Validate that Fetcher and _Broker_Data share the same column-A field
-       labels.
-    5. Read fetched cells (P&L estimates rows 10-17 cols B-G, sentiment B28/B29/B31,
-       FY year labels B4-B6) and write to _Broker_Data verbatim. Skip rows
-       20-25 and B30/B32 — those are formulas in the main template.
+    4. Validate that Fetcher and _Broker_Data share the same column-B field
+       labels at the rows shared.broker_layout expects.
+    5. Read fetched cells (P&L estimates rows 13-20 cols C-H, sentiment
+       C31/C32/C34, FY year labels C7-C9) and write to _Broker_Data verbatim.
+       Skip implied rows 23-28 and C33/C35 — those are formulas / blank in
+       the main template.
     6. Stamp last-fetch timestamp + ticker on _Broker_Data.
     7. Save target model file; close fetcher without saving.
 """
 from __future__ import annotations
 
 import argparse
-import re
 import sys
 import time
 import traceback
@@ -28,20 +28,14 @@ from datetime import datetime
 from pathlib import Path
 
 from shared import broker_layout
+from shared.excel_helpers import format_money
 from shared.excel_session import AppPrefs, get_or_create_app, workbook_already_open
 from shared.model_path import resolve_model_path
+from shared.tickers import validate_ticker
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FETCHER_PATH = REPO_ROOT / "templates" / "broker_fetcher.xlsx"
 ASYNC_BUFFER_SECS = 3
-TICKER_RE = re.compile(r"^[A-Z][A-Z0-9.\-:]{0,14}$")
-
-
-def _validate_ticker(raw: str) -> str:
-    t = (raw or "").strip().upper()
-    if not TICKER_RE.match(t):
-        raise SystemExit(f"Invalid ticker: {raw!r}. Expected something like AAPL, BRK.B, 700:HK.")
-    return t
 
 
 def _expected_field_labels():
@@ -75,20 +69,18 @@ def _validate_layout_match(fetcher_sheet, broker_sheet) -> None:
 
 
 def _check_capiq_loaded(fetcher_sheet) -> None:
-    """C{first PNL row} = IQ_EST_REV(...). #NAME? indicates CapIQ plugin missing."""
+    """C{first PNL row} = IQ_EST_REV(...). #NAME? indicates CapIQ plugin missing.
+
+    err_to_str is required: xlwings maps error cells to None by default, which
+    would silently pass this guard.
+    """
     first_pnl_row = broker_layout.PNL[0][0]
-    val = fetcher_sheet.range((first_pnl_row, 3)).value
+    val = fetcher_sheet.range((first_pnl_row, 3)).options(err_to_str=True).value
     if isinstance(val, str) and val.strip().startswith("#NAME"):
         raise SystemExit(
             f"CapIQ plugin not loaded (C{first_pnl_row} returned #NAME?). Open Excel "
             f"manually, sign in to S&P Capital IQ, then retry."
         )
-
-
-def _format_money(v):
-    if isinstance(v, (int, float)):
-        return f"${v:,.0f}M" if abs(v) >= 1_000_000 else f"${v:,.2f}"
-    return repr(v)
 
 
 # Cells the fetcher provides values for (everything except formula rows).
@@ -101,10 +93,6 @@ SENTIMENT_FETCH_ROWS = [r for r, _, fmt in broker_layout.SENTIMENT if fmt is not
 
 def fetch(ticker: str, headless: bool = False, model_path_override: str | None = None) -> None:
     model_path = resolve_model_path(ticker, model_path_override)
-    if not model_path.exists():
-        raise SystemExit(
-            f"Missing {model_path}. Run `python -m shared.scaffold_template` first."
-        )
     if not FETCHER_PATH.exists():
         raise SystemExit(
             f"Missing {FETCHER_PATH}. Run `python -m shared.scaffold_broker_fetcher` first."
@@ -169,12 +157,15 @@ def fetch(ticker: str, headless: bool = False, model_path_override: str | None =
             broker_sheet.range((r, 3)).value = v
             fy_values.append(v)
 
-        # P&L grid (rows 10-17, cols B-G)
+        # P&L grid (broker_layout.PNL rows 13-20, cols C-H). err_to_str so
+        # error cells arrive as strings (countable) instead of None.
         cells_written = 0
         errors = 0
         err_samples = []
         for r in PNL_ROWS:
-            row_values = fetcher_sheet.range((r, PNL_COLS[0]), (r, PNL_COLS[1])).value
+            row_values = fetcher_sheet.range(
+                (r, PNL_COLS[0]), (r, PNL_COLS[1])
+            ).options(err_to_str=True).value
             broker_sheet.range((r, PNL_COLS[0]), (r, PNL_COLS[1])).value = row_values
             for v in (row_values or []):
                 if v not in (None, ""):
@@ -187,7 +178,7 @@ def fetch(ticker: str, headless: bool = False, model_path_override: str | None =
         # Sentiment fetched rows (column C in new layout). Skip implied-upside
         # and recommendation-distribution rows — those are formulas / blank.
         for r in SENTIMENT_FETCH_ROWS:
-            v = fetcher_sheet.range((r, 3)).value
+            v = fetcher_sheet.range((r, 3)).options(err_to_str=True).value
             broker_sheet.range((r, 3)).value = v
             if v not in (None, ""):
                 cells_written += 1
@@ -204,18 +195,20 @@ def fetch(ticker: str, headless: bool = False, model_path_override: str | None =
         print(f"  Cells written: {cells_written}")
         print(f"  Errors: {errors}" + (f"  e.g. {err_samples}" if err_samples else ""))
 
-        # Sample value reads (new layout positions): Revenue FY1 mean = C13,
-        # EBITDA FY1 mean = C15, # analysts = C31, avg price target = C32.
-        rev_fy1    = broker_sheet.range((13, 3)).value
-        ebitda_fy1 = broker_sheet.range((15, 3)).value
-        n_analysts = broker_sheet.range((31, 3)).value
-        avg_target = broker_sheet.range((32, 3)).value
+        # Sample value reads (rows sourced from broker_layout; FY1 means and
+        # sentiment values live in column C).
+        pnl_row = {label: r for r, label, *_ in broker_layout.PNL}
+        sent_row = {label: r for r, label, _ in broker_layout.SENTIMENT}
+        rev_fy1    = broker_sheet.range((pnl_row["Revenue"], 3)).value
+        ebitda_fy1 = broker_sheet.range((pnl_row["EBITDA"], 3)).value
+        n_analysts = broker_sheet.range((sent_row["Number of Analysts Covering"], 3)).value
+        avg_target = broker_sheet.range((sent_row["Average Price Target"], 3)).value
         print()
         print("  Sample values:")
-        print(f"    Revenue FY1 (mean):   {_format_money(rev_fy1)}")
-        print(f"    EBITDA FY1 (mean):    {_format_money(ebitda_fy1)}")
+        print(f"    Revenue FY1 (mean):   {format_money(rev_fy1)}")
+        print(f"    EBITDA FY1 (mean):    {format_money(ebitda_fy1)}")
         print(f"    # Analysts (rev FY1): {n_analysts!r}")
-        print(f"    Avg price target:     {_format_money(avg_target)}")
+        print(f"    Avg price target:     {format_money(avg_target)}")
 
         if errors:
             print(
@@ -260,9 +253,9 @@ def main(argv=None):
     parser.add_argument("--headless", action="store_true",
                         help="Run Excel hidden. Default is visible so CapIQ auth issues are easy to debug.")
     parser.add_argument("--model-path", default=None,
-                        help="Override the model file. Default: per-ticker copy if it exists, else master template.")
+                        help="Override the model file. Default: the per-ticker copy created by new_ticker.")
     args = parser.parse_args(argv)
-    ticker = _validate_ticker(args.ticker)
+    ticker = validate_ticker(args.ticker)
     fetch(ticker, headless=args.headless, model_path_override=args.model_path)
 
 

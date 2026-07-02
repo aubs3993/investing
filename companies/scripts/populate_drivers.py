@@ -16,6 +16,8 @@ from pathlib import Path
 
 from openpyxl import load_workbook
 
+from shared.tickers import fs_ticker
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # Map YAML driver key -> (named range in workbook, expected length, number format)
@@ -37,11 +39,12 @@ SINGLE_MAP = [
 
 
 def _config_path_for(ticker: str) -> Path:
-    return REPO_ROOT / "companies" / "configs" / f"{ticker}.yaml"
+    return REPO_ROOT / "companies" / "configs" / f"{fs_ticker(ticker)}.yaml"
 
 
 def _model_path_for(ticker: str) -> Path:
-    return REPO_ROOT / "companies" / "output" / ticker / f"{ticker}_model.xlsx"
+    fs = fs_ticker(ticker)
+    return REPO_ROOT / "companies" / "output" / fs / f"{fs}_model.xlsx"
 
 
 def _validate_config(config: dict) -> None:

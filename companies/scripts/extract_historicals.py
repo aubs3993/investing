@@ -14,11 +14,22 @@ from pathlib import Path
 
 from openpyxl import load_workbook
 
+from shared import capiq_layout
+from shared.excel_helpers import validate_field_labels
+from shared.tickers import fs_ticker
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
+# Row positions sourced from shared/capiq_layout.py (the source of truth for
+# the _CapIQ_Data tab).
+HIST_ROW = {label: r for r, label in capiq_layout.HISTORICALS}
+CUR_ROW = {label: r for r, label, _ in capiq_layout.CURRENT_STATE}
+META_ROW = {label: r for r, label, _ in capiq_layout.METADATA}
 
 
 def _model_path_for(ticker: str) -> Path:
-    return REPO_ROOT / "companies" / "output" / ticker / f"{ticker}_model.xlsx"
+    fs = fs_ticker(ticker)
+    return REPO_ROOT / "companies" / "output" / fs / f"{fs}_model.xlsx"
 
 
 def _safe_div(num, den):
@@ -31,15 +42,21 @@ def _safe_div(num, den):
 
 
 def _cagr(start, end, years):
-    if start is None or end is None or start <= 0 or end <= 0 or years <= 0:
+    try:
+        if start is None or end is None or start <= 0 or end <= 0 or years <= 0:
+            return None
+        return (end / start) ** (1 / years) - 1
+    except TypeError:  # non-numeric, e.g. '#N/A' error strings on the data tab
         return None
-    return (end / start) ** (1 / years) - 1
 
 
 def _yoy(prev, curr):
-    if prev in (None, 0) or curr is None:
+    try:
+        if prev in (None, 0) or curr is None:
+            return None
+        return curr / prev - 1
+    except TypeError:  # non-numeric, e.g. '#N/A' error strings on the data tab
         return None
-    return curr / prev - 1
 
 
 def _avg(vals):
@@ -65,21 +82,33 @@ def extract(ticker: str) -> dict:
         raise SystemExit("Model is missing _CapIQ_Data tab. Regenerate via scaffold_template.")
     cap = wb["_CapIQ_Data"]
 
+    # Abort on layout drift instead of silently reading the wrong cells.
+    validate_field_labels(
+        cap, capiq_layout.all_field_rows(), "_CapIQ_Data",
+        "Fix: re-run `python -m shared.scaffold_template` and re-fetch, "
+        "OR update shared/capiq_layout.py to match the workbook.",
+    )
+
     # Historical rows on _CapIQ_Data: cols C/D/E = FY-2, FY-1, FY (most recent
     # completed year). Two-period span (FY-2 -> FY) yields a 2-year CAGR.
-    def hist(row):
-        return [_get(cap, row, 3), _get(cap, row, 4), _get(cap, row, 5)]
+    def hist(label):
+        row = HIST_ROW[label]
+        return [
+            _get(cap, row, capiq_layout.COL_FY_M2),
+            _get(cap, row, capiq_layout.COL_FY_M1),
+            _get(cap, row, capiq_layout.COL_FY),
+        ]
 
-    revenue = hist(31)
-    cogs = hist(32)
-    gp = hist(33)
-    opex = hist(34)
-    da = hist(35)
-    ebitda = hist(36)
-    ebit = hist(37)
-    capex = hist(38)
-    sbc = hist(39)
-    dps = hist(40)
+    revenue = hist("Revenue")
+    cogs = hist("COGS")
+    gp = hist("Gross Profit")
+    opex = hist("Total Opex")
+    da = hist("D&A")
+    ebitda = hist("EBITDA")
+    ebit = hist("EBIT")
+    capex = hist("Capex")
+    sbc = hist("SBC")
+    dps = hist("DPS")
 
     def block(values):
         return {
@@ -120,24 +149,25 @@ def extract(ticker: str) -> dict:
         "sbc_pct_rev":   ratio_block(sbc, revenue),
     }
 
-    # Current state — Section A (rows 12-15) and Section B (rows 18-28) values
+    # Current state — Section A (metadata) and Section B (current-state) values
     # all live in column F. Effective tax rate is no longer fetched.
+    col_cur = capiq_layout.COL_CURRENT
     current_state = {
-        "company_name":          _get(cap, 12, 6),
-        "sector":                _get(cap, 13, 6),
-        "currency":              _get(cap, 14, 6),
-        "filing_status":         _get(cap, 15, 6),
-        "price":                 _get(cap, 18, 6),
-        "diluted_shares_mm":     _get(cap, 19, 6),
-        "market_cap_mm":         _get(cap, 20, 6),
-        "cash_mm":               _get(cap, 21, 6),
-        "st_investments_mm":     _get(cap, 22, 6),
-        "debt_mm":               _get(cap, 23, 6),
-        "preferred_equity_mm":   _get(cap, 24, 6),
-        "minority_interest_mm":  _get(cap, 25, 6),
-        "equity_investments_mm": _get(cap, 26, 6),
-        "marketable_securities_mm": _get(cap, 27, 6),
-        "enterprise_value_mm":   _get(cap, 28, 6),
+        "company_name":          _get(cap, META_ROW["Company Name"], col_cur),
+        "sector":                _get(cap, META_ROW["Sector"], col_cur),
+        "currency":              _get(cap, META_ROW["Currency"], col_cur),
+        "filing_status":         _get(cap, META_ROW["Filing Status"], col_cur),
+        "price":                 _get(cap, CUR_ROW["Current Price"], col_cur),
+        "diluted_shares_mm":     _get(cap, CUR_ROW["Diluted Shares Out"], col_cur),
+        "market_cap_mm":         _get(cap, CUR_ROW["Market Cap"], col_cur),
+        "cash_mm":               _get(cap, CUR_ROW["Cash & Equivalents"], col_cur),
+        "st_investments_mm":     _get(cap, CUR_ROW["ST Investments"], col_cur),
+        "debt_mm":               _get(cap, CUR_ROW["Total Debt"], col_cur),
+        "preferred_equity_mm":   _get(cap, CUR_ROW["Preferred Equity"], col_cur),
+        "minority_interest_mm":  _get(cap, CUR_ROW["Minority Interest"], col_cur),
+        "equity_investments_mm": _get(cap, CUR_ROW["Equity Investments"], col_cur),
+        "marketable_securities_mm": _get(cap, CUR_ROW["Marketable Securities"], col_cur),
+        "enterprise_value_mm":   _get(cap, CUR_ROW["Enterprise Value"], col_cur),
     }
     debt = current_state.get("debt_mm")
     cash = current_state.get("cash_mm")
@@ -153,7 +183,7 @@ def extract(ticker: str) -> dict:
         "company_name": current_state.get("company_name"),
         "sector": current_state.get("sector"),
         "currency": current_state.get("currency"),
-        "fetch_timestamp": _get(cap, 8, 3),  # _CapIQ_Data!C8 = fetcher run-date
+        "fetch_timestamp": _get(cap, capiq_layout.ROW_FETCHER_DATE, 3),  # col C, written by fetch_capiq
         "historicals": historicals,
         "ratios": ratios,
         "current_state": current_state,

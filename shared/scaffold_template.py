@@ -19,49 +19,34 @@ from datetime import datetime
 from pathlib import Path
 
 from openpyxl import Workbook
-from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
-from openpyxl.utils import get_column_letter
+from openpyxl.styles import Border, Font, Side
+from openpyxl.utils import column_index_from_string, get_column_letter
 from openpyxl.workbook.defined_name import DefinedName
 
 from shared import broker_layout, capiq_layout
+# Universal styling (Arial 10pt, banker color-coding) is shared with the
+# fetcher scaffolders via shared.excel_helpers.
+from shared.excel_helpers import (
+    ARIAL, ARIAL_SIZE, FORMULA_FONT, HAIR, HEADER_ALIGN, HEADER_FILL,
+    HEADER_FONT, INPUT_BORDER, INPUT_FILL, INPUT_FONT, TITLE_FONT,
+    LABEL as LABEL_FONT, LABEL_BOLD as LABEL_BOLD_FONT,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 TEMPLATE_PATH = REPO_ROOT / "templates" / "company_model.xlsx"
 
 
-# --- Universal styling (Arial 10pt across the workbook) ---
-ARIAL = "Arial"
-ARIAL_SIZE = 10
-
-BLUE_INPUT = "0000FF"
+# --- Template-specific styling (on top of shared.excel_helpers) ---
 GREEN_LINK = "008000"
-BLACK = "000000"
-WHITE = "FFFFFF"
-YELLOW_FILL = "FFFF99"
-HEADER_BLUE = "0070C0"
 BANNER_GRAY = "808080"
 
-HAIR = Side(border_style="hair")
 THIN_TOP = Side(border_style="thin")
 
-INPUT_FONT = Font(name=ARIAL, size=ARIAL_SIZE, bold=False, color=BLUE_INPUT)
-INPUT_FILL = PatternFill("solid", fgColor=YELLOW_FILL)
-INPUT_BORDER = Border(top=HAIR, bottom=HAIR, left=HAIR, right=HAIR)
-
-HEADER_FONT = Font(name=ARIAL, size=ARIAL_SIZE, bold=True, color=WHITE)
-HEADER_FILL = PatternFill("solid", fgColor=HEADER_BLUE)
-HEADER_ALIGN = Alignment(horizontal="center", vertical="center")
-
 LINK_FONT = Font(name=ARIAL, size=ARIAL_SIZE, color=GREEN_LINK)
-FORMULA_FONT = Font(name=ARIAL, size=ARIAL_SIZE, color=BLACK)
-SUBTOTAL_FONT = Font(name=ARIAL, size=ARIAL_SIZE, bold=True, color=BLACK)
+SUBTOTAL_FONT = Font(name=ARIAL, size=ARIAL_SIZE, bold=True, color="000000")
 SUBTOTAL_TOP_BORDER = Border(top=THIN_TOP)
 
-TITLE_FONT = Font(name=ARIAL, size=ARIAL_SIZE, bold=True, color=BLACK)
-LABEL_FONT = Font(name=ARIAL, size=ARIAL_SIZE, color=BLACK)
-LABEL_BOLD_FONT = Font(name=ARIAL, size=ARIAL_SIZE, bold=True, color=BLACK)
-SECTION_FONT = Font(name=ARIAL, size=ARIAL_SIZE, bold=True, color=BLACK)
 BANNER_FONT = Font(name=ARIAL, size=ARIAL_SIZE, italic=True, color=BANNER_GRAY)
 
 
@@ -142,6 +127,23 @@ def col(i):
     return get_column_letter(i + 3)
 
 
+# --- _CapIQ_Data cell references, derived from shared.capiq_layout ---
+# capiq_layout is the source of truth for _CapIQ_Data row positions; build
+# cross-tab links from it instead of hardcoding coordinates.
+CAPIQ_HIST_ROW = {label: r for r, label in capiq_layout.HISTORICALS}
+_CAPIQ_F_ROW = {label: r for r, label, _ in (*capiq_layout.METADATA, *capiq_layout.CURRENT_STATE)}
+
+
+def capiq_f(label):
+    """'=_CapIQ_Data!F<row>' link for a metadata / current-state field."""
+    return f"=_CapIQ_Data!{capiq_layout.CURRENT_COL}{_CAPIQ_F_ROW[label]}"
+
+
+_DPS_ROW = CAPIQ_HIST_ROW["DPS"]
+_DPS_LINK = (f"=IFERROR(_CapIQ_Data!{capiq_layout.HIST_COLS[2]}{_DPS_ROW}, "
+             f"_CapIQ_Data!{capiq_layout.HIST_COLS[1]}{_DPS_ROW})")
+
+
 # --- Inputs tab layout (referenced by other tabs via named ranges) ---
 # Universal: row 1 blank, row 2 title, row 3 blank, content from row 4.
 INPUTS_SECTION_A_ROW = 4
@@ -153,18 +155,18 @@ INPUT_ROWS = [
     ("Ticker",                     "inp_ticker",              TEXT,  "TICKR",        None),
     ("Run Date",                   "inp_run_date",            DATE,  None,           None),
     ("Fiscal Year End Month",      "inp_fye_month",           "0",   12,             None),
-    ("Company Name",               "inp_company_name",        TEXT,  None,           "=_CapIQ_Data!F12"),
-    ("Sector",                     "inp_sector",              TEXT,  None,           "=_CapIQ_Data!F13"),
-    ("Currency",                   "inp_currency",            TEXT,  None,           "=_CapIQ_Data!F14"),
-    ("Current Price",              "inp_current_price",       PRICE, None,           "=_CapIQ_Data!F18"),
-    ("Diluted Shares Outstanding", "inp_diluted_shares",      NUM,   None,           "=_CapIQ_Data!F19"),
-    ("Annual DPS",                 "inp_annual_dps",          DPS,   None,           "=IFERROR(_CapIQ_Data!E40, _CapIQ_Data!D40)"),
+    ("Company Name",               "inp_company_name",        TEXT,  None,           capiq_f("Company Name")),
+    ("Sector",                     "inp_sector",              TEXT,  None,           capiq_f("Sector")),
+    ("Currency",                   "inp_currency",            TEXT,  None,           capiq_f("Currency")),
+    ("Current Price",              "inp_current_price",       PRICE, None,           capiq_f("Current Price")),
+    ("Diluted Shares Outstanding", "inp_diluted_shares",      NUM,   None,           capiq_f("Diluted Shares Out")),
+    ("Annual DPS",                 "inp_annual_dps",          DPS,   None,           _DPS_LINK),
     ("DPS Annual Growth %",        "inp_dps_growth",          PCT,   0,              None),
     ("Tax Rate",                   "inp_tax_rate",            PCT,   0.21,           None),
-    ("Cash & Equivalents",         "inp_cash",                NUM,   None,           "=_CapIQ_Data!F21"),
-    ("Total Debt",                 "inp_debt",                NUM,   None,           "=_CapIQ_Data!F23"),
-    ("Minority Interest",          "inp_minority_interest",   NUM,   None,           "=_CapIQ_Data!F25"),
-    ("Equity Investments",         "inp_equity_investments",  NUM,   None,           "=_CapIQ_Data!F26"),
+    ("Cash & Equivalents",         "inp_cash",                NUM,   None,           capiq_f("Cash & Equivalents")),
+    ("Total Debt",                 "inp_debt",                NUM,   None,           capiq_f("Total Debt")),
+    ("Minority Interest",          "inp_minority_interest",   NUM,   None,           capiq_f("Minority Interest")),
+    ("Equity Investments",         "inp_equity_investments",  NUM,   None,           capiq_f("Equity Investments")),
     ("Cash Sweep %",               "inp_cash_sweep_pct",      PCT,   0,              None),
     ("Minimum Cash Balance",       "inp_min_cash",            NUM,   0,              None),
 ]
@@ -395,7 +397,7 @@ def build_is(ws, years):
     for i in range(n):
         cur = col(i)
         if not _is_proj(years, i):
-            style_link(ws.cell(IS_ROW_REV, i + 3, f"=_CapIQ_Data!{cur}31"))
+            style_link(ws.cell(IS_ROW_REV, i + 3, f"=_CapIQ_Data!{cur}{CAPIQ_HIST_ROW['Revenue']}"))
         else:
             prev = col(i - 1)
             style_formula(ws.cell(IS_ROW_REV, i + 3, f"={prev}{IS_ROW_REV}*(1+Inputs!{cur}${DRV_REV})"))
@@ -416,7 +418,7 @@ def build_is(ws, years):
     for i in range(n):
         cur = col(i)
         if not _is_proj(years, i):
-            style_link(ws.cell(IS_ROW_COGS, i + 3, f"=_CapIQ_Data!{cur}32"))
+            style_link(ws.cell(IS_ROW_COGS, i + 3, f"=_CapIQ_Data!{cur}{CAPIQ_HIST_ROW['COGS']}"))
         else:
             style_formula(ws.cell(IS_ROW_COGS, i + 3, f"={cur}{IS_ROW_REV}*(1-Inputs!{cur}${DRV_GM})"))
 
@@ -437,7 +439,7 @@ def build_is(ws, years):
     for i in range(n):
         cur = col(i)
         if not _is_proj(years, i):
-            style_link(ws.cell(IS_ROW_OPEX, i + 3, f"=_CapIQ_Data!{cur}34"))
+            style_link(ws.cell(IS_ROW_OPEX, i + 3, f"=_CapIQ_Data!{cur}{CAPIQ_HIST_ROW['Total Opex']}"))
         else:
             style_formula(ws.cell(IS_ROW_OPEX, i + 3, f"={cur}{IS_ROW_REV}*Inputs!{cur}${DRV_OPEX}"))
 
@@ -458,7 +460,7 @@ def build_is(ws, years):
     for i in range(n):
         cur = col(i)
         if not _is_proj(years, i):
-            style_link(ws.cell(IS_ROW_DA, i + 3, f"=_CapIQ_Data!{cur}35"))
+            style_link(ws.cell(IS_ROW_DA, i + 3, f"=_CapIQ_Data!{cur}{CAPIQ_HIST_ROW['D&A']}"))
         else:
             # CapEx on CF is negative; negate, then multiply by D&A%
             style_link(
@@ -587,7 +589,7 @@ def build_cf(ws, years):
     for i in range(n):
         cur = col(i)
         if not _is_proj(years, i):
-            style_link(ws.cell(CF_ROW_CAPEX, i + 3, f"=-_CapIQ_Data!{cur}38"))
+            style_link(ws.cell(CF_ROW_CAPEX, i + 3, f"=-_CapIQ_Data!{cur}{CAPIQ_HIST_ROW['Capex']}"))
         else:
             style_formula(
                 ws.cell(CF_ROW_CAPEX, i + 3, f"=-IS!{cur}{IS_ROW_REV}*Inputs!{cur}${DRV_CAPEX}")
@@ -1000,11 +1002,21 @@ def build_capiq_data(ws):
             style_label(ws.cell(r, 2, label), bold=True)
         else:
             style_label(ws.cell(r, 2, label))
-    # Market Cap = F18 * F19
-    style_subtotal(ws.cell(20, 6, "=F18*F19"), num_format=NUM)
-    # Enterprise Value = F20 - F21 - F22 + F23 + F24 + F25 - F26 - F27
+    c = capiq_layout.CURRENT_COL
+    c_idx = column_index_from_string(c)
+    cs = _CAPIQ_F_ROW
+    # Market Cap = Current Price * Diluted Shares Out
     style_subtotal(
-        ws.cell(28, 6, "=F20-F21-F22+F23+F24+F25-F26-F27"),
+        ws.cell(cs["Market Cap"], c_idx,
+                f"={c}{cs['Current Price']}*{c}{cs['Diluted Shares Out']}"),
+        num_format=NUM,
+    )
+    # Enterprise Value = Market Cap - Cash - ST Inv + Debt + Pref + Minority - Eq Inv - Mkt Sec
+    style_subtotal(
+        ws.cell(cs["Enterprise Value"], c_idx,
+                f"={c}{cs['Market Cap']}-{c}{cs['Cash & Equivalents']}-{c}{cs['ST Investments']}"
+                f"+{c}{cs['Total Debt']}+{c}{cs['Preferred Equity']}+{c}{cs['Minority Interest']}"
+                f"-{c}{cs['Equity Investments']}-{c}{cs['Marketable Securities']}"),
         num_format=NUM,
     )
 
@@ -1020,7 +1032,7 @@ def build_capiq_data(ws):
 def build_broker_data(ws):
     """Mirror of broker_fetcher.xlsx Fetcher tab.
 
-    P&L grid (rows 13-20 cols C-H) and sentiment fetched values (B31, B32, B34)
+    P&L grid (rows 13-20 cols C-H) and sentiment fetched values (C31, C32, C34)
     are populated by shared/fetch_broker_estimates.py at runtime. Implied
     growth/margin formulas (rows 23-28) and implied upside (row 33) live in
     this workbook so they update when historicals refresh.

@@ -12,16 +12,16 @@ After bootstrap, run the fetch + extract + research workflow.
 from __future__ import annotations
 
 import argparse
-import re
 import shutil
 from datetime import date
 from pathlib import Path
 
 from openpyxl import load_workbook
 
+from shared.tickers import fs_ticker, validate_ticker
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MASTER_TEMPLATE = REPO_ROOT / "templates" / "company_model.xlsx"
-TICKER_RE = re.compile(r"^[A-Z][A-Z0-9.\-:]{0,14}$")
 
 
 SKELETON_YAML = """\
@@ -35,25 +35,21 @@ analyst: Aubrey
 """
 
 
-def _validate_ticker(raw: str) -> str:
-    t = (raw or "").strip().upper()
-    if not TICKER_RE.match(t):
-        raise SystemExit(f"Invalid ticker: {raw!r}. Expected something like AAPL, BRK.B, 700:HK.")
-    return t
-
-
 def bootstrap(ticker: str) -> None:
     if not MASTER_TEMPLATE.exists():
         raise SystemExit(
             f"Missing {MASTER_TEMPLATE}. Run `python -m shared.scaffold_template` first."
         )
 
-    output_dir = REPO_ROOT / "companies" / "output" / ticker
+    # Paths use the filesystem-safe ticker (':' is invalid in Windows paths);
+    # the raw ticker still goes into inp_ticker and the YAML.
+    fs = fs_ticker(ticker)
+    output_dir = REPO_ROOT / "companies" / "output" / fs
     configs_dir = REPO_ROOT / "companies" / "configs"
     output_dir.mkdir(parents=True, exist_ok=True)
     configs_dir.mkdir(parents=True, exist_ok=True)
 
-    model_path = output_dir / f"{ticker}_model.xlsx"
+    model_path = output_dir / f"{fs}_model.xlsx"
     if model_path.exists():
         raise SystemExit(
             f"{model_path} already exists. Delete it explicitly if you want to start fresh."
@@ -70,7 +66,7 @@ def bootstrap(ticker: str) -> None:
         wb[sheet_name][cell_range] = ticker
     wb.save(model_path)
 
-    config_path = configs_dir / f"{ticker}.yaml"
+    config_path = configs_dir / f"{fs}.yaml"
     if not config_path.exists():
         config_path.write_text(
             SKELETON_YAML.format(ticker=ticker, today=date.today().isoformat()),
@@ -86,7 +82,7 @@ def bootstrap(ticker: str) -> None:
     print(f"  4. python -m companies.scripts.extract_broker_estimates {ticker}  # review consensus")
     print(f"  5. Open Claude Code, ask: \"research drivers for {ticker} using the playbook")
     print(f"     at companies/scripts/driver_research_playbook.md\"")
-    print(f"  6. Review companies/configs/{ticker}.yaml and companies/output/{ticker}/drivers_rationale.md")
+    print(f"  6. Review companies/configs/{fs}.yaml and companies/output/{fs}/drivers_rationale.md")
     print(f"  7. python -m companies.scripts.populate_drivers {ticker}          # write to model")
     print(f"  8. Open the model in Excel for final review")
 
@@ -95,7 +91,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description="Bootstrap per-ticker model + config.")
     parser.add_argument("ticker")
     args = parser.parse_args(argv)
-    ticker = _validate_ticker(args.ticker)
+    ticker = validate_ticker(args.ticker)
     bootstrap(ticker)
 
 
