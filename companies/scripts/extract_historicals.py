@@ -7,38 +7,25 @@ Usage:
 """
 from __future__ import annotations
 
-import argparse
-import json
-import sys
-from pathlib import Path
-
 from openpyxl import load_workbook
 
 from shared import capiq_layout
 from shared.excel_helpers import validate_field_labels
-from shared.tickers import fs_ticker
-
-REPO_ROOT = Path(__file__).resolve().parents[2]
+from shared.extract_common import (
+    fmt_money as _fmt_money,
+    fmt_num as _fmt_num,
+    fmt_pct as _fmt_pct,
+    get_cell as _get,
+    run_extract_cli,
+    safe_div as _safe_div,
+)
+from shared.model_path import model_path_for as _model_path_for
 
 # Row positions sourced from shared/capiq_layout.py (the source of truth for
 # the _CapIQ_Data tab).
 HIST_ROW = {label: r for r, label in capiq_layout.HISTORICALS}
 CUR_ROW = {label: r for r, label, _ in capiq_layout.CURRENT_STATE}
 META_ROW = {label: r for r, label, _ in capiq_layout.METADATA}
-
-
-def _model_path_for(ticker: str) -> Path:
-    fs = fs_ticker(ticker)
-    return REPO_ROOT / "companies" / "output" / fs / f"{fs}_model.xlsx"
-
-
-def _safe_div(num, den):
-    try:
-        if den in (None, 0) or num is None:
-            return None
-        return num / den
-    except (TypeError, ZeroDivisionError):
-        return None
 
 
 def _cagr(start, end, years):
@@ -64,10 +51,6 @@ def _avg(vals):
     if not clean:
         return None
     return sum(clean) / len(clean)
-
-
-def _get(ws, row, col):
-    return ws.cell(row, col).value
 
 
 def extract(ticker: str) -> dict:
@@ -190,11 +173,6 @@ def extract(ticker: str) -> dict:
     }
 
 
-def _fmt_pct(v): return f"{v*100:.1f}%" if isinstance(v, (int, float)) else "—"
-def _fmt_num(v): return f"{v:,.0f}" if isinstance(v, (int, float)) else "—"
-def _fmt_money(v): return f"${v:,.2f}" if isinstance(v, (int, float)) else "—"
-
-
 def to_markdown(data: dict) -> str:
     h = data["historicals"]
     r = data["ratios"]
@@ -256,23 +234,8 @@ def to_markdown(data: dict) -> str:
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="Extract historicals brief from _CapIQ_Data.")
-    parser.add_argument("ticker")
-    parser.add_argument("--format", choices=["json", "markdown"], default="json")
-    parser.add_argument("--output", default=None,
-                        help="Write to file instead of stdout.")
-    args = parser.parse_args(argv)
-    ticker = args.ticker.strip().upper()
-    data = extract(ticker)
-    if args.format == "json":
-        out = json.dumps(data, indent=2, default=str)
-    else:
-        out = to_markdown(data)
-    if args.output:
-        Path(args.output).write_text(out, encoding="utf-8")
-        print(f"Wrote {args.output}")
-    else:
-        sys.stdout.write(out + "\n")
+    run_extract_cli(extract, to_markdown,
+                    "Extract historicals brief from _CapIQ_Data.", argv)
 
 
 if __name__ == "__main__":

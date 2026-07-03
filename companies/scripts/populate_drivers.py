@@ -16,7 +16,8 @@ from pathlib import Path
 
 from openpyxl import load_workbook
 
-from shared.tickers import fs_ticker
+from shared.model_path import model_path_for as _model_path_for
+from shared.tickers import fs_ticker, validate_ticker
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -40,11 +41,6 @@ SINGLE_MAP = [
 
 def _config_path_for(ticker: str) -> Path:
     return REPO_ROOT / "companies" / "configs" / f"{fs_ticker(ticker)}.yaml"
-
-
-def _model_path_for(ticker: str) -> Path:
-    fs = fs_ticker(ticker)
-    return REPO_ROOT / "companies" / "output" / fs / f"{fs}_model.xlsx"
 
 
 def _validate_config(config: dict) -> None:
@@ -92,7 +88,7 @@ def write_to_named_range(wb, range_name, values, num_format=None):
             )
         for cell, value in zip(cells, values):
             cell.value = value
-            if num_format and not cell.number_format or cell.number_format == "General":
+            if num_format and (not cell.number_format or cell.number_format == "General"):
                 cell.number_format = num_format
             elif num_format and cell.number_format in ("0.0%", "0.0\"x\"", "0.00\"x\"", "#,##0;(#,##0)"):
                 cell.number_format = num_format
@@ -155,7 +151,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description="Populate driver values from YAML into a ticker's model.")
     parser.add_argument("ticker")
     args = parser.parse_args(argv)
-    ticker = args.ticker.strip().upper()
+    ticker = validate_ticker(args.ticker)
     populate(ticker)
 
 

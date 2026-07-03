@@ -27,3 +27,5 @@ Personal investing research repo. Code is organized by what it analyzes.
 - `python-dotenv` — environment variable loading
 - `fredapi` — FRED API client
 - `matplotlib` — charting
+- `pyyaml` — per-ticker YAML config parsing
+- `xlwings` — drives live Excel for the CapIQ / broker fetch scripts

@@ -1,6 +1,7 @@
 from datetime import date, datetime
 from pathlib import Path
 import os
+import socket
 
 from dotenv import load_dotenv
 from fredapi import Fred
@@ -12,6 +13,10 @@ def get_fred_client() -> Fred:
     api_key = os.getenv("FRED_API_KEY")
     if not api_key:
         raise RuntimeError("FRED_API_KEY not found in environment or .env file")
+    # fredapi calls urllib with no timeout, so a stalled connection to
+    # api.stlouisfed.org would hang every pull script forever. Set a
+    # process-wide default so a dead connection fails within a bounded time.
+    socket.setdefaulttimeout(30)
     return Fred(api_key=api_key.strip())
 
 
@@ -36,12 +41,29 @@ def resolve_output_dir(script_file: str | Path, topic: str) -> Path:
     return out_dir
 
 
+def series_stats(series: pd.Series) -> dict:
+    """Min/max/mean/median/current summary stats for one series (NaNs dropped)."""
+    s = series.dropna()
+    return {
+        "min": s.min(),
+        "max": s.max(),
+        "mean": s.mean(),
+        "median": s.median(),
+        "current": s.iloc[-1] if len(s) else None,
+    }
+
+
 def get_recession_periods(
     fred: Fred,
     start: datetime | date,
     end: datetime | date,
 ) -> list[tuple[pd.Timestamp, pd.Timestamp]]:
-    """Return NBER recession periods from FRED's USREC series as (start, end) tuples."""
+    """Return NBER recession periods from FRED's USREC series as (start, end) tuples.
+
+    USREC is monthly with first-of-month timestamps, so each band ends at the
+    first non-recession month — otherwise axvspan would stop shading at the
+    start of the final recession month, cutting the band a month short.
+    """
     rec = fred.get_series("USREC", observation_start=start, observation_end=end)
     rec = rec.dropna().astype(int)
     periods: list[tuple[pd.Timestamp, pd.Timestamp]] = []
@@ -53,7 +75,7 @@ def get_recession_periods(
             cur_start = idx
             in_recession = True
         elif val == 0 and in_recession:
-            periods.append((cur_start, prev_idx))
+            periods.append((cur_start, idx))
             in_recession = False
             cur_start = None
         prev_idx = idx

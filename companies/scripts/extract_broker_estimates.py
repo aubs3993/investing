@@ -10,19 +10,20 @@ units as the model's drivers, so they can be compared directly.
 """
 from __future__ import annotations
 
-import argparse
-import json
-import sys
-from pathlib import Path
-
 from openpyxl import load_workbook
 from openpyxl.utils import column_index_from_string
 
 from shared import broker_layout, capiq_layout
 from shared.excel_helpers import validate_field_labels
-from shared.tickers import fs_ticker
-
-REPO_ROOT = Path(__file__).resolve().parents[2]
+from shared.extract_common import (
+    fmt_money as _fmt_money,
+    fmt_num as _fmt_num,
+    fmt_pct as _fmt_pct,
+    get_cell as _get,
+    run_extract_cli,
+    safe_div as _safe_div,
+)
+from shared.model_path import model_path_for as _model_path_for
 
 # Cell coordinates sourced from the layout modules (the source of truth for
 # the hidden data tabs). Single-value cells (last fetch, FY years, sentiment)
@@ -41,26 +42,6 @@ CAPIQ_HIST_ROW = {label: r for r, label in capiq_layout.HISTORICALS}
 CAPIQ_CUR_ROW = {label: r for r, label, _ in capiq_layout.CURRENT_STATE}
 
 
-def _model_path_for(ticker: str) -> Path:
-    fs = fs_ticker(ticker)
-    return REPO_ROOT / "companies" / "output" / fs / f"{fs}_model.xlsx"
-
-
-def _safe_div(num, den):
-    try:
-        if den in (None, 0) or num is None:
-            return None
-        return num / den
-    except (TypeError, ZeroDivisionError):
-        return None
-
-
-def _safe_sub(a, b):
-    if a is None or b is None:
-        return None
-    return a - b
-
-
 def _safe_growth(prev, curr):
     try:
         if prev in (None, 0) or curr is None:
@@ -68,10 +49,6 @@ def _safe_growth(prev, curr):
         return curr / prev - 1
     except TypeError:  # non-numeric, e.g. '#N/A' error strings on the data tab
         return None
-
-
-def _get(ws, row, col):
-    return ws.cell(row, col).value
 
 
 def _recommendation_label(score):
@@ -201,11 +178,6 @@ def extract(ticker: str) -> dict:
     }
 
 
-def _fmt_pct(v): return f"{v*100:.1f}%" if isinstance(v, (int, float)) else "—"
-def _fmt_num(v): return f"{v:,.0f}" if isinstance(v, (int, float)) else "—"
-def _fmt_money(v): return f"${v:,.2f}" if isinstance(v, (int, float)) else "—"
-
-
 def to_markdown(data: dict) -> str:
     be = data["broker_estimates"]
     sent = data["analyst_sentiment"]
@@ -260,22 +232,8 @@ def to_markdown(data: dict) -> str:
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="Extract broker estimates brief from _Broker_Data.")
-    parser.add_argument("ticker")
-    parser.add_argument("--format", choices=["json", "markdown"], default="json")
-    parser.add_argument("--output", default=None)
-    args = parser.parse_args(argv)
-    ticker = args.ticker.strip().upper()
-    data = extract(ticker)
-    if args.format == "json":
-        out = json.dumps(data, indent=2, default=str)
-    else:
-        out = to_markdown(data)
-    if args.output:
-        Path(args.output).write_text(out, encoding="utf-8")
-        print(f"Wrote {args.output}")
-    else:
-        sys.stdout.write(out + "\n")
+    run_extract_cli(extract, to_markdown,
+                    "Extract broker estimates brief from _Broker_Data.", argv)
 
 
 if __name__ == "__main__":

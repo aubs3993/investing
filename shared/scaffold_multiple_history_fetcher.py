@@ -70,7 +70,7 @@ def build_fetcher(ws):
     style_input(lb_cell)
     lb_cell.number_format = "0"
 
-    # Column headers (row 10, columns B..O).
+    # Column headers (ROW_COL_HEADERS, columns B..{layout.DATA_COLUMNS[-1][0]}).
     for letter, header, _role in layout.DATA_COLUMNS:
         col_idx = column_index_from_string(letter)
         style_header(ws.cell(layout.ROW_COL_HEADERS, col_idx, header))

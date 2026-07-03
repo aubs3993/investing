@@ -30,6 +30,7 @@ from shared.fred_helpers import (
     get_recession_periods,
     pull_series,
     resolve_output_dir,
+    series_stats,
     style_macro_chart,
 )
 
@@ -65,20 +66,9 @@ df_cfnai = pull_series(fred, cfnai_series, data_start, end)
 df_cfnai = df_cfnai[df_cfnai["Date"] >= pd.Timestamp(chart_start)].reset_index(drop=True)
 
 
-def _stats(series: pd.Series) -> dict:
-    s = series.dropna()
-    return {
-        "min": s.min(),
-        "max": s.max(),
-        "mean": s.mean(),
-        "median": s.median(),
-        "current": s.iloc[-1] if len(s) else None,
-    }
-
-
 summary_rows = {
-    "composite": _stats(df_regional["composite"]),
-    "CFNAIMA3": _stats(df_cfnai["CFNAIMA3"]),
+    "composite": series_stats(df_regional["composite"]),
+    "CFNAIMA3": series_stats(df_cfnai["CFNAIMA3"]),
 }
 summary = pd.DataFrame(summary_rows).T[["min", "max", "mean", "median", "current"]]
 

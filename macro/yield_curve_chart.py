@@ -67,7 +67,10 @@ fig.tight_layout()
 
 OUT_DIR = Path(__file__).resolve().parent / "output" / "yield_curve"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
-chart_path = OUT_DIR / "spread_chart.png"
+# Distinct filename from yield_curve_pull.py's spread_chart.png — this chart
+# plots FRED's T10Y2Y over a rolling 20-year window, not the computed
+# DGS10-DGS2 spread from 2006, so the two must not overwrite each other.
+chart_path = OUT_DIR / "spread_chart_t10y2y_20y.png"
 fig.savefig(chart_path, dpi=300)
 print(f"Saved {chart_path}")
 

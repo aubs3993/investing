@@ -15,6 +15,12 @@ from shared.tickers import fs_ticker
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
+def model_path_for(ticker: str) -> Path:
+    """Path of the per-ticker model copy (companies/output/<T>/<T>_model.xlsx)."""
+    fs = fs_ticker(ticker)
+    return REPO_ROOT / "companies" / "output" / fs / f"{fs}_model.xlsx"
+
+
 def resolve_model_path(ticker: str, override: str | None = None) -> Path:
     """Return the model file the fetch should write to.
 
@@ -31,8 +37,7 @@ def resolve_model_path(ticker: str, override: str | None = None) -> Path:
             raise FileNotFoundError(f"--model-path {p} does not exist")
         return p
 
-    fs = fs_ticker(ticker)
-    per_ticker = REPO_ROOT / "companies" / "output" / fs / f"{fs}_model.xlsx"
+    per_ticker = model_path_for(ticker)
     if per_ticker.exists():
         return per_ticker
     raise SystemExit(

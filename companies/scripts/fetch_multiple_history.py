@@ -147,7 +147,6 @@ def _build_hardcoded_copy(out_path: Path, ticker: str, end_date: date_cls,
         col_idx = column_index_from_string(letter)
         style_header(ws.cell(layout.ROW_COL_HEADERS, col_idx, header))
 
-    last_col_idx = _last_data_col_idx()
     n = len(dates)
     for i in range(n):
         r = layout.ROW_DATA_START + i
@@ -158,8 +157,8 @@ def _build_hardcoded_copy(out_path: Path, ticker: str, end_date: date_cls,
         # Remaining columns from values_2d. Each row of values_2d corresponds
         # to a fetcher row; values_2d[i] is the row for dates[i].
         row_vals = values_2d[i] if i < len(values_2d) else []
-        # values_2d came from columns B..O — index 0 is the date (already
-        # written above), so iterate from index 1.
+        # values_2d came from columns B..{layout.DATA_COLUMNS[-1][0]} — index 0
+        # is the date (already written above), so iterate from index 1.
         for letter, _label, _role in layout.DATA_COLUMNS[1:]:
             col_idx = column_index_from_string(letter)
             v = row_vals[col_idx - 2] if (col_idx - 2) < len(row_vals) else None

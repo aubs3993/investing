@@ -11,6 +11,7 @@ from shared.fred_helpers import (
     get_recession_periods,
     pull_series,
     resolve_output_dir,
+    series_stats,
     style_macro_chart,
 )
 
@@ -41,24 +42,14 @@ df_w["ICSA_ma4"] = df_w["ICSA"].rolling(4).mean()
 df_w = df_w[df_w["Date"] >= pd.Timestamp(chart_start)].reset_index(drop=True)
 
 # Build Summary stats per series. Each row is one series; columns are stats.
-def _stats(series: pd.Series) -> dict:
-    s = series.dropna()
-    return {
-        "min": s.min(),
-        "max": s.max(),
-        "mean": s.mean(),
-        "median": s.median(),
-        "current": s.iloc[-1] if len(s) else None,
-    }
-
 summary_rows = {
-    "PAYEMS": _stats(df_m["PAYEMS"]),
-    "PAYEMS_change": _stats(df_m["PAYEMS_change"]),
-    "PAYEMS_change_ma3": _stats(df_m["PAYEMS_change_ma3"]),
-    "UNRATE": _stats(df_m["UNRATE"]),
-    "SAHMREALTIME": _stats(df_m["SAHMREALTIME"]),
-    "ICSA": _stats(df_w["ICSA"]),
-    "ICSA_ma4": _stats(df_w["ICSA_ma4"]),
+    "PAYEMS": series_stats(df_m["PAYEMS"]),
+    "PAYEMS_change": series_stats(df_m["PAYEMS_change"]),
+    "PAYEMS_change_ma3": series_stats(df_m["PAYEMS_change_ma3"]),
+    "UNRATE": series_stats(df_m["UNRATE"]),
+    "SAHMREALTIME": series_stats(df_m["SAHMREALTIME"]),
+    "ICSA": series_stats(df_w["ICSA"]),
+    "ICSA_ma4": series_stats(df_w["ICSA_ma4"]),
 }
 summary = pd.DataFrame(summary_rows).T[["min", "max", "mean", "median", "current"]]
 

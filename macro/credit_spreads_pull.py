@@ -14,6 +14,7 @@
 
 from datetime import datetime
 from pathlib import Path
+import os
 import sys
 
 import matplotlib.pyplot as plt
@@ -54,13 +55,31 @@ if archive_path.exists():
     archive = pd.read_csv(archive_path, parse_dates=["Date"])
     combined = pd.concat([archive, new_rows], ignore_index=True)
 else:
+    archive = None
     combined = new_rows
 combined = (
     combined.drop_duplicates(subset="Date", keep="last")
     .sort_values("Date")
     .reset_index(drop=True)
 )
-combined.to_csv(archive_path, index=False)
+
+# The archive is irreplaceable (FRED serves only ~3 years), so guard the
+# rewrite: never shrink it, never write non-finite values, and swap the new
+# file in atomically so a crash mid-write can't truncate it.
+if archive is not None and len(combined) < len(archive):
+    raise SystemExit(
+        f"Aborting archive update: merged result has {len(combined)} rows, "
+        f"fewer than the existing archive's {len(archive)}. Archive left untouched."
+    )
+oas_values = pd.to_numeric(combined["HY_OAS"], errors="coerce")
+if oas_values.isna().any() or (oas_values.abs() == float("inf")).any():
+    raise SystemExit(
+        "Aborting archive update: merged result contains non-numeric or "
+        "non-finite HY_OAS values. Archive left untouched."
+    )
+tmp_path = archive_path.with_name(archive_path.name + ".tmp")
+combined.to_csv(tmp_path, index=False)
+os.replace(tmp_path, archive_path)
 
 # Statistics are computed over the FRED-served window (the same df used for
 # plotting), not the archive — keeps the chart and the xlsx Summary internally

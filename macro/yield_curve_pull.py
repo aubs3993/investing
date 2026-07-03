@@ -41,7 +41,13 @@ summary = pd.DataFrame({
 
 OUT_DIR = resolve_output_dir(__file__, "yield_curve")
 out_path = OUT_DIR / "yields.xlsx"
-with pd.ExcelWriter(out_path, engine="openpyxl") as writer:
+# Append/replace rather than rewrite so the 'Chart Data' sheet that
+# yield_curve_chart.py adds to the same workbook survives this pull.
+if out_path.exists():
+    writer_kwargs = {"mode": "a", "if_sheet_exists": "replace"}
+else:
+    writer_kwargs = {}
+with pd.ExcelWriter(out_path, engine="openpyxl", **writer_kwargs) as writer:
     df.to_excel(writer, sheet_name="Data", index=False)
     summary.to_excel(writer, sheet_name="Summary")
 
