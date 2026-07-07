@@ -166,3 +166,42 @@ Run via: `python -m companies.scripts.fetch_multiple_history <TICKER> [--end-dat
 Defaults: end date = today, lookback = 5 years.
 
 EV uses point-in-time balance sheet values (IQ_LP), so cash/debt update only on filing dates while market cap updates daily.
+
+### Long-horizon macro analyses (added July 2026)
+
+Nine macro modules covering aggregate US valuation, the credit cycle, and consumer
+spending pull-forward. Full construction recipes, interpretation guides, verified
+citations, and a fragile-source registry live in `macro/ANALYSES.md` — read it
+before modifying any of these scripts.
+
+| Script | What it produces | Window |
+|---|---|---|
+| `macro/shiller_pe_pull.py` | Trailing P/E, CAPE, TR CAPE (Shiller ie_data.xls) | 1871+ monthly |
+| `macro/nipa_pe_pull.py` | Z.1/NIPA macro P/E, 4 scope/tax variants | 1947+ quarterly |
+| `macro/ev_multiples_pull.py` | Aggregate EV/EBIT, EV/EBITDA, FCF yields, MC/distributed-FCF | 1952Q4+ quarterly |
+| `macro/valuation_multiple_drivers_pull.py` | D&A share, effective tax rate, yields vs real 10y, margin, intangibles | 1947+ quarterly |
+| `macro/sp500_long_history_pull.py` | S&P price + total-return index, drawdowns; emits `sp500_monthly.csv` | 1871+ monthly |
+| `macro/credit_cycle_pull.py` | Credit-cycle STRESS/FROTH composites + component panels; pairs vs S&P and rates | 1919+ monthly |
+| `macro/consumer_pullforward_pull.py` | Pull-forward & sustainability gauge (trend gaps, excess savings, UMich intent) | 2006+ (buffer 1990) |
+| `macro/consumer_global_pull.py` | US consumer vs world (BIS credit, OECD saving/debt/durables) | 2006/2007+ quarterly |
+| `macro/sector_multiples_pull.py` | Damodaran sector EV/EBITDA & EV/EBIT (approx. Stage-1) | 1998+ annual |
+
+Conventions specific to these modules:
+- **Run order:** `sp500_long_history_pull.py` before `credit_cycle_pull.py` — the
+  credit script reads `macro/output/sp500_long_history/sp500_monthly.csv`
+  (columns `Date,P,D,E,CPI,TR,TR_real,drawdown` are a data contract).
+- **Long-history exception:** these scripts intentionally chart pre-2006 windows;
+  each documents the exception in its header and emits a 2006+ companion chart.
+  Reference stats are computed over each chart's own window.
+- **Bridge series:** `CI_HH`/`CI_CC` (household / consumer-credit impulses) are
+  computed with identical formulas in both `credit_cycle_pull.py` and
+  `consumer_pullforward_pull.py` to keep the two composites deduplicated
+  (credit composite owns business credit + CI_HH; pull-forward gauge owns
+  revolving credit, card delinquencies, saving rate + CI_CC).
+- **Audits:** every module has an independent audit script in `macro/audits/`
+  (`audit_<topic>.py`) that re-derives key values from raw sources and exits
+  nonzero on FAIL. After modifying a module, run its audit. Audits never import
+  the analysis scripts.
+- **External fetches beyond FRED** (Shiller xls, Fed EBP csv, OECD SDMX, UMich
+  SCA, Damodaran xls) all cache raw downloads in their output folder and skip
+  gracefully (with console message) when the source is unreachable.
