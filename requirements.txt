@@ -5,3 +5,4 @@ fredapi
 matplotlib
 pyyaml
 xlwings
+requests

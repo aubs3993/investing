@@ -116,6 +116,32 @@ An openpyxl-based Excel MCP server (haris-musa's `excel-mcp-server`, registered 
 - Refresh via `python -m shared.fetch_capiq <TICKER>` (uses xlwings to drive live Excel + CapIQ plugin).
 - The main template must be openable on machines without CapIQ access — never break this invariant.
 
+### XBRL historicals fetcher (preferred, no CapIQ needed)
+- `python -m shared.fetch_xbrl <TICKER> [--price N] [--offline] [--model-path PATH]` fills the
+  same `_CapIQ_Data` tab as `fetch_capiq`, but from SEC EDGAR companyfacts/submissions JSON
+  (financials, metadata) and Yahoo Finance's v8 chart endpoint (current price). No Excel, no
+  CapIQ. Preferred fetch path since July 2026; `fetch_capiq` remains the alternative on a
+  machine with a live CapIQ plugin. Design ported from the `merlin_stock_updates` repo
+  (`stock_updates/fundamentals.py`, `sec.py`, `quotes.py`).
+- Requires `SEC_USER_AGENT` in `.env`, formatted `Name email@example.com` (SEC rejects
+  anonymous clients).
+- Raw SEC downloads are cached in `companies/output/<TICKER>/` and used as fallback when the
+  network fails (`--offline` forces cache-only). Yahoo price failures degrade to a blank price
+  with a note — set it with `--price`.
+- Conventions (documented in the module docstring; differences vs CapIQ worth knowing):
+  - Values in $ millions (shares too); DPS and price are per-share dollars.
+  - **EBITDA row = adjusted EBITDA** = EBIT + D&A + restructuring/impairment add-backs, using
+    `max(combined tag, sum of individual tags)` per fiscal year. SBC is deliberately NOT added
+    back (CapIQ convention). Total Opex is derived as Gross Profit − adj EBITDA and EBIT as
+    adj EBITDA − D&A so the IS tab's subtotal identities hold on an adjusted basis.
+  - Total Debt includes finance leases, excludes operating leases (CapIQ convention).
+  - Shares = dei cover-page count (basic); margins are as-reported GAAP presentation, not
+    CapIQ-standardized (COGS keeps embedded D&A).
+  - Fiscal years derive from period end dates (companyfacts `fy`/`fp` fields are unreliable);
+    only 10-K/10-Q forms are read; absent tags render blank + console note, tagged zeros are 0.
+- Broker estimates (`fetch_broker_estimates`) and `fetch_multiple_history` remain
+  CapIQ-dependent — there is no XBRL source for consensus data.
+
 ### Broker estimates integration
 - Broker consensus forecasts flow from `templates/broker_fetcher.xlsx` (live `IQ_EST_*` formulas) into `templates/company_model.xlsx` → hidden `_Broker_Data` tab.
 - `shared/broker_layout.py` is the shared layout source of truth (mirror of `capiq_layout.py`).
@@ -124,7 +150,7 @@ An openpyxl-based Excel MCP server (haris-musa's `excel-mcp-server`, registered 
 
 ### Per-ticker workflow
 1. **Bootstrap:** `python -m companies.scripts.new_ticker <TICKER>` (copies master template to `companies/output/<TICKER>/<TICKER>_model.xlsx`, creates skeleton YAML)
-2. **Fetch historicals:** `python -m shared.fetch_capiq <TICKER>`
+2. **Fetch historicals:** `python -m shared.fetch_xbrl <TICKER>` (or `python -m shared.fetch_capiq <TICKER>` with live CapIQ)
 3. **Fetch broker estimates:** `python -m shared.fetch_broker_estimates <TICKER>`
 4. **Extract briefs:** `python -m companies.scripts.extract_historicals <TICKER>` and `python -m companies.scripts.extract_broker_estimates <TICKER>`
 5. **Research drivers:** Open Claude Code session. Ask Claude to research drivers for the ticker using `companies/scripts/driver_research_playbook.md`. Claude reads historicals, consensus, Notion, and SEC filings; writes to YAML config and rationale markdown; updates Historical Analysis in Notion (durable) and appends Driver Research entry (dated).
@@ -132,7 +158,7 @@ An openpyxl-based Excel MCP server (haris-musa's `excel-mcp-server`, registered 
 7. **Populate model:** `python -m companies.scripts.populate_drivers <TICKER>`
 8. **Final review:** Open model in Excel.
 
-The split between research (Claude-driven) and populate (deterministic) means values can be regenerated without re-running research. Both fetch scripts write to the per-ticker model copy and abort if it doesn't exist yet (only an explicit `--model-path` can target another file), so the master template stays clean.
+The split between research (Claude-driven) and populate (deterministic) means values can be regenerated without re-running research. All fetch scripts write to the per-ticker model copy and abort if it doesn't exist yet (only an explicit `--model-path` can target another file), so the master template stays clean.
 
 ### Notion structure per company
 Each company page in Notion has two distinct sections:
